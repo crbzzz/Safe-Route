@@ -987,10 +987,51 @@ function renderChatMessages() {
   for (const message of state.chatMessages) {
     const bubble = document.createElement('article');
     bubble.className = `chat-bubble ${message.role}`;
-    bubble.textContent = message.text;
+    bubble.innerHTML = formatChatMessage(message.text, message.role);
     els.chatMessages.appendChild(bubble);
   }
   els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+}
+
+function formatChatMessage(text, role) {
+  const safeText = escapeHtml(text || '');
+
+  if (role !== 'assistant') {
+    return safeText.replace(/\n/g, '<br />');
+  }
+
+  const blocks = safeText.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+  if (!blocks.length) {
+    return '<p></p>';
+  }
+
+  return blocks
+    .map((block) => {
+      const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
+      if (!lines.length) return '';
+
+      const isBulletList = lines.every((line) => /^[-*]\s+/.test(line));
+      const isOrderedList = lines.every((line) => /^\d+\.\s+/.test(line));
+
+      if (isBulletList) {
+        return `<ul>${lines.map((line) => `<li>${applyInlineFormatting(line.replace(/^[-*]\s+/, ''))}</li>`).join('')}</ul>`;
+      }
+
+      if (isOrderedList) {
+        return `<ol>${lines.map((line) => `<li>${applyInlineFormatting(line.replace(/^\d+\.\s+/, ''))}</li>`).join('')}</ol>`;
+      }
+
+      return `<p>${applyInlineFormatting(lines.join('<br />'))}</p>`;
+    })
+    .join('');
+}
+
+function applyInlineFormatting(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/__(.+?)__/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/_(.+?)_/g, '<em>$1</em>');
 }
 
 function submitReport() {
