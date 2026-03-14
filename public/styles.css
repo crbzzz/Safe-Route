@@ -693,17 +693,25 @@ textarea::placeholder {
   min-height: 160px;
   overflow: auto;
   margin: 14px 0;
+  align-content: start;
+  justify-items: start;
 }
 
 .chat-bubble {
-  max-width: 88%;
-  padding: 12px 14px;
+  width: fit-content;
+  max-width: min(82%, 32rem);
+  padding: 10px 12px;
   border-radius: 18px;
   line-height: 1.45;
+  align-self: start;
+  justify-self: start;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .chat-bubble.user {
   margin-left: auto;
+  justify-self: end;
   background: linear-gradient(135deg, #2563eb, #0ea5e9);
   color: white;
 }
@@ -711,6 +719,39 @@ textarea::placeholder {
 .chat-bubble.assistant {
   background: rgba(15, 23, 42, 0.9);
   border: 1px solid var(--line);
+}
+
+.chat-bubble p,
+.chat-bubble ul,
+.chat-bubble ol {
+  margin: 0;
+}
+
+.chat-bubble p + p,
+.chat-bubble p + ul,
+.chat-bubble p + ol,
+.chat-bubble ul + p,
+.chat-bubble ol + p,
+.chat-bubble ul + ul,
+.chat-bubble ol + ol {
+  margin-top: 8px;
+}
+
+.chat-bubble ul,
+.chat-bubble ol {
+  padding-left: 18px;
+}
+
+.chat-bubble li + li {
+  margin-top: 4px;
+}
+
+.chat-bubble strong {
+  font-weight: 700;
+}
+
+.chat-bubble em {
+  font-style: italic;
 }
 
 .chat-form {
