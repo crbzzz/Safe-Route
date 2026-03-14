@@ -1,0 +1,10 @@
+{
+  "name": "saferoute-sf",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Risk-aware walking routes for San Francisco using DataSF, Mapbox, and Mistral AI.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}

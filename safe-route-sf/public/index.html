@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>SafeRoute SF</title>
+    <meta
+      name="description"
+      content="Live safer walking navigation for San Francisco with location tracking, route guidance, AI chat, and incident reporting."
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="/styles.css?v=20260314-mobile-fix3" />
+  </head>
+  <body>
+    <div id="appShell" class="app-shell">
+      <div id="map"></div>
+      <div id="statusText" class="sr-only" aria-live="polite">Live city guidance</div>
+      <button id="sheetBackdrop" class="sheet-backdrop hidden" type="button" aria-label="Close panel"></button>
+
+      <header class="top-hud top-actions-only">
+        <div class="hud-actions hud-actions-top">
+          <button id="settingsButton" class="top-action-button settings" type="button" aria-label="Open settings panel">
+            <svg class="top-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 0 1-2.8 0 2 2 0 0 1 0-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 0 1 0-2.8 2 2 0 0 1 2.8 0l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 0 1 2.8 0 2 2 0 0 1 0 2.8l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6h.2a2 2 0 0 1 0 4h-.2a1 1 0 0 0-.9.6Z"></path>
+            </svg>
+            <span class="sr-only">Settings</span>
+          </button>
+        </div>
+      </header>
+
+      <section id="navCard" class="nav-card hidden">
+        <div class="nav-top">
+          <div>
+            <span id="routeModeLabel" class="nav-label">Safer route</span>
+            <strong id="etaRemaining">-- min left</strong>
+          </div>
+          <button id="stopRouteButton" class="ghost-button" type="button">End</button>
+        </div>
+        <div class="nav-metrics">
+          <span id="distanceRemaining">-- km left</span>
+          <span id="riskSummary">Risk --</span>
+        </div>
+        <p id="nextInstruction" class="nav-instruction">Choose a destination to start.</p>
+        <div class="nav-actions">
+          <button id="saferRouteButton" class="segment-button active" type="button">Safer</button>
+          <button id="fastestRouteButton" class="segment-button" type="button">Fastest</button>
+        </div>
+      </section>
+
+      <section id="bottomSheet" class="bottom-sheet">
+        <form id="routeForm" class="search-card" autocomplete="off">
+          <div class="origin-row">
+            <button id="useMyLocationButton" class="pill-button active" type="button">My location</button>
+            <button id="originToggleButton" class="pill-button" type="button">Origin</button>
+            <button id="swapButton" class="pill-button" type="button">Swap</button>
+          </div>
+
+          <div id="originField" class="field-stack hidden">
+            <input id="originInput" name="origin" placeholder="Origin" />
+            <div id="originSuggestions" class="suggestions hidden"></div>
+          </div>
+
+          <div class="field-stack destination-field">
+            <input id="destinationInput" name="destination" placeholder="Where to?" required />
+            <div id="destinationSuggestions" class="suggestions hidden"></div>
+          </div>
+
+          <div class="meta-row">
+            <div class="custom-select" data-select="hours">
+              <select id="hoursSelect" class="sr-only" aria-label="Live window">
+                <option value="6">6h</option>
+                <option value="12">12h</option>
+                <option value="24">24h</option>
+                <option value="48" selected>48h</option>
+                <option value="72">72h</option>
+              </select>
+              <button id="hoursSelectButton" class="select-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+                <span id="hoursSelectLabel">48h</span>
+              </button>
+              <div id="hoursSelectMenu" class="select-menu hidden" role="listbox" aria-label="Live window options">
+                <button class="select-option" type="button" data-select="hours" data-value="6">6h</button>
+                <button class="select-option" type="button" data-select="hours" data-value="12">12h</button>
+                <button class="select-option" type="button" data-select="hours" data-value="24">24h</button>
+                <button class="select-option" type="button" data-select="hours" data-value="48">48h</button>
+                <button class="select-option" type="button" data-select="hours" data-value="72">72h</button>
+              </div>
+            </div>
+            <div class="custom-select" data-select="source">
+              <select id="sourceSelect" class="sr-only" aria-label="Source layer">
+                <option value="all" selected>All</option>
+                <option value="calls">Calls</option>
+                <option value="incidents">Incidents</option>
+              </select>
+              <button id="sourceSelectButton" class="select-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+                <span id="sourceSelectLabel">All</span>
+              </button>
+              <div id="sourceSelectMenu" class="select-menu hidden" role="listbox" aria-label="Source layer options">
+                <button class="select-option" type="button" data-select="source" data-value="all">All</button>
+                <button class="select-option" type="button" data-select="source" data-value="calls">Calls</button>
+                <button class="select-option" type="button" data-select="source" data-value="incidents">Incidents</button>
+              </div>
+            </div>
+          </div>
+
+          <label class="severity-switch" for="violentOnlyInput">
+            <span class="severity-copy">
+              <strong>Highest severity only</strong>
+              <small>Focus on the strongest recent signals</small>
+            </span>
+            <span class="switch-shell">
+              <input type="checkbox" id="violentOnlyInput" class="sr-only" />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </span>
+          </label>
+
+          <button id="compareButton" class="primary-button" type="submit">Start safer route</button>
+        </form>
+      </section>
+
+      <section id="settingsSheet" class="overlay-sheet hidden">
+        <div class="sheet-head">
+          <strong>Settings</strong>
+          <button id="settingsCloseButton" class="ghost-button" type="button">Close</button>
+        </div>
+        <div class="settings-actions">
+          <button id="settingsReportButton" class="sheet-action-button" type="button">
+            <svg class="top-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 4 21 20H3L12 4Z"></path>
+              <path d="M12 9v5"></path>
+              <circle cx="12" cy="17" r="1"></circle>
+            </svg>
+            <span>Report</span>
+          </button>
+          <button id="settingsChatButton" class="sheet-action-button" type="button">
+            <svg class="top-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="6" y="7" width="12" height="10" rx="3"></rect>
+              <path d="M9 7V5"></path>
+              <path d="M15 7V5"></path>
+              <circle cx="10" cy="12" r="1"></circle>
+              <circle cx="14" cy="12" r="1"></circle>
+              <path d="M10 15h4"></path>
+            </svg>
+            <span>AI</span>
+          </button>
+        </div>
+        <div class="settings-info">
+          <p class="settings-copy">Live risk view for the current filters.</p>
+          <div class="settings-stats">
+            <article class="settings-stat">
+              <span>Live events</span>
+              <strong id="totalEvents">--</strong>
+            </article>
+            <article class="settings-stat accent">
+              <span>Violent</span>
+              <strong id="violentEvents">--</strong>
+            </article>
+            <article class="settings-stat">
+              <span>Calls</span>
+              <strong id="callEvents">--</strong>
+            </article>
+            <article class="settings-stat">
+              <span>Incidents</span>
+              <strong id="incidentEvents">--</strong>
+            </article>
+          </div>
+          <p class="settings-note">Risk scores use recent public-safety signals, time decay, and route proximity. This is guidance, not a guarantee of safety.</p>
+        </div>
+      </section>
+
+      <section id="reportSheet" class="overlay-sheet hidden">
+        <div class="sheet-head">
+          <strong>Report nearby incident</strong>
+          <button id="reportCloseButton" class="ghost-button" type="button">Close</button>
+        </div>
+        <label class="sheet-field">
+          <span>Type</span>
+          <select id="reportTypeSelect">
+            <option value="Armed or dangerous person">Armed or dangerous person</option>
+            <option value="Aggression">Aggression</option>
+            <option value="Suspicious activity">Suspicious activity</option>
+            <option value="Theft or robbery">Theft or robbery</option>
+            <option value="Medical emergency">Medical emergency</option>
+          </select>
+        </label>
+        <label class="sheet-field">
+          <span>Note</span>
+          <textarea id="reportNoteInput" rows="4" placeholder="Short detail"></textarea>
+        </label>
+        <button id="reportSubmitButton" class="primary-button" type="button">Send report from my location</button>
+        <p id="reportStatus" class="sheet-status">Your report stays local on this device for now.</p>
+      </section>
+
+      <section id="chatSheet" class="overlay-sheet hidden">
+        <div class="sheet-head">
+          <strong>AI support</strong>
+          <button id="chatCloseButton" class="ghost-button" type="button">Close</button>
+        </div>
+        <div id="chatMessages" class="chat-messages"></div>
+        <form id="chatForm" class="chat-form">
+          <textarea id="askInput" rows="3" placeholder="Can I walk here right now?"></textarea>
+          <button id="askButton" class="primary-button" type="submit">Ask</button>
+        </form>
+      </section>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="/app.js?v=20260314-mobile-fix3"></script>
+  </body>
+</html>
