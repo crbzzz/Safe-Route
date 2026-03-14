@@ -103,6 +103,33 @@ function sendError(res, status, error, extra = {}) {
   const message = error instanceof Error ? error.message : String(error);
   sendJson(res, status, { error: message, ...extra });
 }
+
+function escapeHtmlAttribute(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+function getRequestOrigin(req) {
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const protocol = forwardedProto || 'http';
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  const host = forwardedHost || req.headers.host || `localhost:${PORT}`;
+  return `${protocol}://${host}`;
+}
+
+function injectHtmlMetadata(html, req, pathname) {
+  const origin = getRequestOrigin(req);
+  const pageUrl = new URL(pathname === '/' ? '/' : pathname, origin).toString();
+  const shareImageUrl = new URL('/logo.png', origin).toString();
+
+  return html
+    .replaceAll('__APP_URL__', escapeHtmlAttribute(pageUrl))
+    .replaceAll('__SHARE_IMAGE_URL__', escapeHtmlAttribute(shareImageUrl));
+}
+
 async function parseBody(req) {
   const chunks = [];
   for await (const chunk of req) {
@@ -319,8 +346,11 @@ async function serveStatic(req, res, pathname) {
     if (stat.isDirectory()) {
       return serveStatic(req, res, path.join(cleaned, 'index.html'));
     }
-    const content = await fs.readFile(filePath);
     const ext = path.extname(filePath).toLowerCase();
+    const isHtml = ext === '.html';
+    const content = isHtml
+      ? Buffer.from(injectHtmlMetadata(await fs.readFile(filePath, 'utf8'), req, pathname), 'utf8')
+      : await fs.readFile(filePath);
     const contentType = {
       '.html': 'text/html; charset=utf-8',
       '.css': 'text/css; charset=utf-8',
