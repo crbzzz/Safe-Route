@@ -617,6 +617,140 @@ function minDistanceToPolylineMeters(event, coordinates) {
   }
   return min;
 }
+
+function closestSegmentInfo(point, coordinates) {
+  if (!Array.isArray(coordinates) || coordinates.length < 2) return null;
+
+  let best = null;
+
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const start = { lng: coordinates[index - 1][0], lat: coordinates[index - 1][1] };
+    const end = { lng: coordinates[index][0], lat: coordinates[index][1] };
+    const refLat = (point.lat + start.lat + end.lat) / 3;
+    const p = projectToMeters(point, refLat);
+    const a = projectToMeters(start, refLat);
+    const b = projectToMeters(end, refLat);
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const apx = p.x - a.x;
+    const apy = p.y - a.y;
+    const ab2 = abx * abx + aby * aby;
+    const t = ab2 === 0 ? 0 : clamp((apx * abx + apy * aby) / ab2, 0, 1);
+    const closestMeters = { x: a.x + abx * t, y: a.y + aby * t };
+    const dx = p.x - closestMeters.x;
+    const dy = p.y - closestMeters.y;
+    const distanceMeters = Math.sqrt(dx * dx + dy * dy);
+
+    if (!best || distanceMeters < best.distanceMeters) {
+      best = {
+        distanceMeters,
+        refLat,
+        startMeters: a,
+        endMeters: b,
+        closestMeters,
+      };
+    }
+  }
+
+  return best;
+}
+
+function metersToLngLat(pointMeters, referenceLat) {
+  const latRad = (referenceLat * Math.PI) / 180;
+  return {
+    lng: pointMeters.x / (111320 * Math.cos(latRad)),
+    lat: pointMeters.y / 110540,
+  };
+}
+
+function buildAvoidanceWaypoint(hazard, coordinates, side) {
+  const segment = closestSegmentInfo({ lat: hazard.lat, lng: hazard.lng }, coordinates);
+  if (!segment) return null;
+
+  const dx = segment.endMeters.x - segment.startMeters.x;
+  const dy = segment.endMeters.y - segment.startMeters.y;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  if (!length) return null;
+
+  const perpendicular = {
+    x: (-dy / length) * side,
+    y: (dx / length) * side,
+  };
+  const forward = {
+    x: dx / length,
+    y: dy / length,
+  };
+
+  const lateralOffset = clamp(150 + (hazard.weight || 0) * 110 + Math.max(0, 180 - (hazard.distanceMeters || 180)) * 0.35, 160, 280);
+  const forwardOffset = 45;
+
+  const waypointMeters = {
+    x: segment.closestMeters.x + perpendicular.x * lateralOffset + forward.x * forwardOffset,
+    y: segment.closestMeters.y + perpendicular.y * lateralOffset + forward.y * forwardOffset,
+  };
+
+  const waypoint = metersToLngLat(waypointMeters, segment.refLat);
+  if (
+    !Number.isFinite(waypoint.lat) ||
+    !Number.isFinite(waypoint.lng) ||
+    waypoint.lng < SF_BOUNDS.west ||
+    waypoint.lng > SF_BOUNDS.east ||
+    waypoint.lat < SF_BOUNDS.south ||
+    waypoint.lat > SF_BOUNDS.north
+  ) {
+    return null;
+  }
+
+  return waypoint;
+}
+
+function dedupeRoutes(routes) {
+  const seen = new Set();
+  const unique = [];
+
+  for (const route of routes) {
+    const coords = route.geometry?.coordinates || [];
+    const middle = coords[Math.floor(coords.length / 2)] || [];
+    const signature = [
+      Math.round(Number(route.distance || 0)),
+      Math.round(Number(route.duration || 0)),
+      middle[0] ? middle[0].toFixed(4) : '0',
+      middle[1] ? middle[1].toFixed(4) : '0',
+    ].join('|');
+
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    unique.push(route);
+  }
+
+  return unique;
+}
+
+async function getAvoidanceDirections(origin, destination, referenceRoute) {
+  const hazards = (referenceRoute?.risk?.avoidanceHazards || []).slice(0, 2);
+  if (!hazards.length) return [];
+
+  const waypointSets = [];
+  for (const hazard of hazards) {
+    for (const side of [-1, 1]) {
+      const waypoint = buildAvoidanceWaypoint(hazard, referenceRoute.geometry?.coordinates || [], side);
+      if (waypoint) {
+        waypointSets.push([waypoint]);
+      }
+    }
+  }
+
+  const settled = await Promise.allSettled(
+    waypointSets.map((waypoints) => getDirections(origin, destination, waypoints)),
+  );
+
+  return dedupeRoutes(
+    settled
+      .filter((result) => result.status === 'fulfilled')
+      .flatMap((result) => result.value),
+  );
+}
+
 function summarizeReasons(eventsNearRoute) {
   const violent = eventsNearRoute.filter((event) => isViolentEvent(event));
   const byNeighborhood = new Map();
@@ -643,6 +777,9 @@ function scoreRoute(route, events) {
   const nearbyEvents = [];
   let rawRisk = 0;
   let proximityBursts = 0;
+  let blockingHazardScore = 0;
+  let severeCorridorCount = 0;
+  let legacyDangerBursts = 0;
   const nowSfHour = getCurrentSfHour();
   const isNight = nowSfHour >= 21 || nowSfHour <= 5;
   for (const event of events) {
@@ -653,18 +790,44 @@ function scoreRoute(route, events) {
     const distanceDecay = Math.exp(-distance / 230);
     const sourceMultiplier = event.source === 'calls' ? 1.12 : 1.0;
     const nightMultiplier = isNight ? 1.1 : 1.0;
+    const violent = isViolentEvent(event);
+    const legacyDangerDecay = violent
+      ? event.ageHours == null
+        ? 0.88
+        : Math.max(0.42, Math.exp(-event.ageHours / 36))
+      : timeDecay;
+    const corridorDecay = violent ? Math.exp(-distance / 150) : Math.exp(-distance / 210);
+    const corridorContribution = violent
+      ? base * legacyDangerDecay * corridorDecay * sourceMultiplier * nightMultiplier
+      : 0;
     const contribution = base * timeDecay * distanceDecay * sourceMultiplier * nightMultiplier;
-    rawRisk += contribution;
+
+    rawRisk += contribution + corridorContribution * 0.85;
+    blockingHazardScore += corridorContribution;
+
     if (distance < 180 && contribution > 0.5) proximityBursts += 1;
+    if (violent && distance < 220 && corridorContribution > 0.32) severeCorridorCount += 1;
+    if (violent && distance < 120 && legacyDangerDecay >= 0.42) legacyDangerBursts += 1;
+
     nearbyEvents.push({
       ...event,
       distanceMeters: Math.round(distance),
-      contribution,
+      contribution: contribution + corridorContribution * 0.85,
     });
   }
   const distanceKm = Math.max((route.distance || 0) / 1000, 0.25);
   const densityScore = rawRisk / Math.pow(distanceKm, 0.75);
-  const riskScore = clamp(Math.round(densityScore * 14 + proximityBursts * 4), 0, 100);
+  const riskScore = clamp(
+    Math.round(
+      densityScore * 14 +
+      proximityBursts * 4 +
+      blockingHazardScore * 9 +
+      severeCorridorCount * 6 +
+      legacyDangerBursts * 8,
+    ),
+    0,
+    100,
+  );
   const sortedEvents = nearbyEvents
     .sort((a, b) => b.contribution - a.contribution)
     .slice(0, 8)
@@ -673,17 +836,29 @@ function scoreRoute(route, events) {
       source: event.source,
       primaryType: event.primaryType,
       secondaryType: event.secondaryType,
+      lat: event.lat,
+      lng: event.lng,
+      weight: Number(riskWeight(event).toFixed(3)),
+      contribution: Number(event.contribution.toFixed(3)),
       distanceMeters: event.distanceMeters,
       neighborhood: event.neighborhood,
       ageHours: event.ageHours == null ? null : Number(event.ageHours.toFixed(1)),
     }));
+
+  const avoidanceHazards = sortedEvents
+    .filter((event) => event.weight >= 1.25 && event.distanceMeters <= 220)
+    .slice(0, 4);
+
   return {
     rawRisk: Number(rawRisk.toFixed(3)),
     riskScore,
+    blockingHazardScore: Number(blockingHazardScore.toFixed(3)),
+    severeCorridorCount,
     nearbyEventCount: nearbyEvents.length,
     violentNearbyCount: nearbyEvents.filter((event) => isViolentEvent(event)).length,
     reasons: summarizeReasons(nearbyEvents),
     topEvents: sortedEvents,
+    avoidanceHazards,
   };
 }
 function formatMinutes(seconds) {
@@ -695,21 +870,39 @@ function chooseRoutePair(scoredRoutes) {
   }
   const fastest = [...scoredRoutes].sort((a, b) => a.duration - b.duration)[0];
   const maxRisk = Math.max(...scoredRoutes.map((route) => route.risk.riskScore), 1);
+  const maxBlockingHazard = Math.max(...scoredRoutes.map((route) => route.risk.blockingHazardScore || 0), 1);
   const minDuration = Math.min(...scoredRoutes.map((route) => route.duration));
   for (const route of scoredRoutes) {
     const normalizedRisk = route.risk.riskScore / maxRisk;
+    const normalizedBlockingHazard = (route.risk.blockingHazardScore || 0) / maxBlockingHazard;
     const normalizedDuration = route.duration / minDuration;
-    route.compositeScore = normalizedRisk * 0.68 + normalizedDuration * 0.32;
+    route.compositeScore = normalizedBlockingHazard * 0.5 + normalizedRisk * 0.35 + normalizedDuration * 0.15;
   }
-  let safest = [...scoredRoutes].sort((a, b) => a.compositeScore - b.compositeScore)[0];
+
+  let safest = [...scoredRoutes].sort((a, b) =>
+    a.risk.severeCorridorCount - b.risk.severeCorridorCount ||
+    a.risk.blockingHazardScore - b.risk.blockingHazardScore ||
+    a.compositeScore - b.compositeScore,
+  )[0];
+
   const meaningfulAlternative = [...scoredRoutes]
     .filter((route) => route !== fastest)
-    .filter((route) => route.risk.riskScore <= fastest.risk.riskScore - 8)
-    .filter((route) => route.duration <= fastest.duration * 1.35)
-    .sort((a, b) => a.compositeScore - b.compositeScore)[0];
+    .filter((route) => route.duration <= fastest.duration * 1.5)
+    .filter((route) =>
+      route.risk.severeCorridorCount < fastest.risk.severeCorridorCount ||
+      route.risk.blockingHazardScore <= fastest.risk.blockingHazardScore - 1.5 ||
+      route.risk.riskScore <= fastest.risk.riskScore - 8,
+    )
+    .sort((a, b) =>
+      a.risk.severeCorridorCount - b.risk.severeCorridorCount ||
+      a.risk.blockingHazardScore - b.risk.blockingHazardScore ||
+      a.compositeScore - b.compositeScore,
+    )[0];
+
   if (meaningfulAlternative) {
     safest = meaningfulAlternative;
   }
+
   return { fastest, safest };
 }
 async function geocodeAddress(query) {
@@ -724,19 +917,28 @@ async function geocodeAddress(query) {
   // Proximity centrée sur downtown SF
   const SF_PROXIMITY = '-122.4194,37.7749';
 
-  const url = new URL('https://api.mapbox.com/search/geocode/v6/forward');
-  url.searchParams.set('q', q);
-  url.searchParams.set('limit', '5');
-  url.searchParams.set('access_token', MAPBOX_ACCESS_TOKEN);
+  const buildUrl = (types) => {
+    const url = new URL('https://api.mapbox.com/search/geocode/v6/forward');
+    url.searchParams.set('q', q);
+    url.searchParams.set('limit', '5');
+    url.searchParams.set('access_token', MAPBOX_ACCESS_TOKEN);
+    url.searchParams.set('bbox', SF_BBOX);
+    url.searchParams.set('proximity', SF_PROXIMITY);
+    url.searchParams.set('country', 'US');
+    url.searchParams.set('language', 'en');
+    if (types) {
+      url.searchParams.set('types', types);
+    }
+    return url;
+  };
 
-  // Important: contraindre la recherche à SF / USA
-  url.searchParams.set('bbox', SF_BBOX);
-  url.searchParams.set('proximity', SF_PROXIMITY);
-  url.searchParams.set('country', 'US');
-  url.searchParams.set('language', 'en');
-  url.searchParams.set('types', 'poi,address,street,place,neighborhood,locality');
+  let data;
+  try {
+    data = await fetchJson(buildUrl('poi,address,street,place,neighborhood,locality').toString());
+  } catch {
+    data = await fetchJson(buildUrl('address,street,place,neighborhood,locality').toString());
+  }
 
-  const data = await fetchJson(url.toString());
   const features = Array.isArray(data.features) ? data.features : [];
 
   function isInsideSf(lng, lat) {
@@ -770,11 +972,13 @@ async function geocodeAddress(query) {
   .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng))
   .filter((item) => isInsideSf(item.lng, item.lat));
 }
-async function getDirections(origin, destination) {
+async function getDirections(origin, destination, waypoints = []) {
   if (!MAPBOX_ACCESS_TOKEN) {
     throw new Error('MAPBOX_ACCESS_TOKEN is missing. Add it to your .env file.');
   }
-  const coords = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
+
+  const allPoints = [origin, ...waypoints, destination];
+  const coords = allPoints.map((point) => `${point.lng},${point.lat}`).join(';');
   const url = new URL(`https://api.mapbox.com/directions/v5/mapbox/walking/${coords}`);
   url.searchParams.set('alternatives', 'true');
   url.searchParams.set('geometries', 'geojson');
@@ -970,7 +1174,7 @@ async function handleRouteCompare(body) {
     violentOnly: Boolean(body?.violentOnly),
     source: 'all',
   });
-  const scoredRoutes = routes.map((route, index) => {
+  let scoredRoutes = routes.map((route, index) => {
     const risk = scoreRoute(route, liveEvents);
     return {
       id: `route-${index + 1}`,
@@ -981,7 +1185,26 @@ async function handleRouteCompare(body) {
       risk,
     };
   });
-  const { fastest, safest } = chooseRoutePair(scoredRoutes);
+
+  let { fastest, safest } = chooseRoutePair(scoredRoutes);
+
+  if (safest.risk.severeCorridorCount >= 2 || safest.risk.blockingHazardScore >= 2) {
+    const avoidanceRoutes = await getAvoidanceDirections(origin, destination, safest);
+    if (avoidanceRoutes.length) {
+      const augmentedRoutes = avoidanceRoutes.map((route, index) => ({
+        id: `detour-${index + 1}`,
+        distance: route.distance,
+        duration: route.duration,
+        geometry: route.geometry,
+        legs: route.legs || [],
+        risk: scoreRoute(route, liveEvents),
+      }));
+
+      scoredRoutes = dedupeRoutes([...scoredRoutes, ...augmentedRoutes]);
+      ({ fastest, safest } = chooseRoutePair(scoredRoutes));
+    }
+  }
+
   const summary = buildComparisonSummary(fastest, safest);
   const ai = await generateAiBrief(summary).catch((error) => ({
     provider: 'fallback',

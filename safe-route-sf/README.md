@@ -1,5 +1,9 @@
 # SafeRoute SF
 
+
+![alt text](image.png)
+
+
 SafeRoute SF is a zero-build web MVP for **risk-aware walking routes in San Francisco**.
 It compares the **fastest** walking route against a **safer trade-off** route by combining:
 
@@ -208,4 +212,5 @@ If you want to turn this into a stronger startup candidate, the next moves are:
 3. Shareable route comparison image cards
 4. Personal preferences (“avoid isolated streets”, “avoid vehicle theft hotspots”, etc.)
 5. City expansion beyond San Francisco
+
 
