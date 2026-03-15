@@ -207,14 +207,4 @@ Body:
 
 ---
 
-## Next upgrades
-
-If you want to turn this into a stronger startup candidate, the next moves are:
-
-1. Segment-level risk overlays on the route itself
-2. Time-of-day previews (“how risky at 11pm?”)
-3. Shareable route comparison image cards
-4. Personal preferences (“avoid isolated streets”, “avoid vehicle theft hotspots”, etc.)
-5. City expansion beyond San Francisco
-
 
