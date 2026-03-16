@@ -29,11 +29,18 @@ const state = {
   useMyLocation: true,
   currentPosition: null,
   heading: null,
+  headingEnabled: false,
   watchId: null,
   followUser: true,
+  programmaticMoveUntil: 0,
   activeSheet: null,
   activeSelectMenu: null,
+  bottomSheetExpanded: false,
+  bottomSheetTouchStartY: null,
+  navSheetExpanded: false,
+  navSheetTouchStartY: null,
   reports: [],
+  renderedIncidentEvents: [],
   chatMessages: [
     {
       role: 'assistant',
@@ -56,7 +63,11 @@ function bindElements() {
     'appShell',
     'sheetBackdrop',
     'statusText',
+    'navTopHud',
+    'navReportButton',
+    'locateButton',
     'settingsButton',
+    'inlineSwapRow',
     'settingsSheet',
     'settingsCloseButton',
     'settingsReportButton',
@@ -93,7 +104,11 @@ function bindElements() {
     'violentEvents',
     'callEvents',
     'incidentEvents',
+    'routeProgressFill',
+    'routeProgressLabel',
+    'navSheetHandle',
     'bottomSheet',
+    'bottomSheetHandle',
     'reportSheet',
     'reportCloseButton',
     'reportTypeSelect',
@@ -116,6 +131,7 @@ function attachEvents() {
   els.useMyLocationButton.addEventListener('click', toggleUseMyLocation);
   els.originToggleButton.addEventListener('click', toggleOriginField);
   els.swapButton.addEventListener('click', swapLocations);
+  els.locateButton.addEventListener('click', recenterOnUser);
   els.hoursSelect.addEventListener('change', loadLiveLayer);
   els.sourceSelect.addEventListener('change', loadLiveLayer);
   els.hoursSelectButton.addEventListener('click', () => toggleSelectMenu('hours'));
@@ -123,13 +139,17 @@ function attachEvents() {
   els.hoursSelectMenu.addEventListener('click', onSelectOptionClick);
   els.sourceSelectMenu.addEventListener('click', onSelectOptionClick);
   els.violentOnlyInput.addEventListener('change', loadLiveLayer);
-  els.destinationInput.addEventListener('input', () => queueSuggestions('destination'));
+  els.destinationInput.addEventListener('input', () => {
+    queueSuggestions('destination');
+    updateCompareButtonVisibility();
+  });
   els.originInput.addEventListener('input', () => queueSuggestions('origin'));
   els.destinationSuggestions.addEventListener('mousedown', onSuggestionPick);
   els.originSuggestions.addEventListener('mousedown', onSuggestionPick);
   els.saferRouteButton.addEventListener('click', () => setActiveRoute('safer'));
   els.fastestRouteButton.addEventListener('click', () => setActiveRoute('fastest'));
   els.stopRouteButton.addEventListener('click', clearNavigation);
+  els.navReportButton.addEventListener('click', () => toggleSheet('report', true));
   els.settingsButton.addEventListener('click', () => toggleSheet('settings', true));
   els.settingsCloseButton.addEventListener('click', () => toggleSheet('settings', false));
   els.settingsChatButton.addEventListener('click', () => toggleSheet('chat', true));
@@ -139,6 +159,22 @@ function attachEvents() {
   els.reportCloseButton.addEventListener('click', () => toggleSheet('report', false));
   els.reportSubmitButton.addEventListener('click', submitReport);
   els.sheetBackdrop.addEventListener('click', closeActiveSheet);
+  els.bottomSheetHandle.addEventListener('click', () => setBottomSheetExpanded(!state.bottomSheetExpanded));
+  els.bottomSheetHandle.addEventListener('touchstart', onBottomSheetTouchStart, { passive: true });
+  els.bottomSheetHandle.addEventListener('touchend', onBottomSheetTouchEnd, { passive: true });
+  els.navSheetHandle.addEventListener('click', () => setNavSheetExpanded(!state.navSheetExpanded));
+  els.navSheetHandle.addEventListener('touchstart', onNavSheetTouchStart, { passive: true });
+  els.navSheetHandle.addEventListener('touchend', onNavSheetTouchEnd, { passive: true });
+
+  for (const field of els.routeForm.querySelectorAll('input, textarea, select')) {
+    field.addEventListener('focus', () => setBottomSheetExpanded(true));
+  }
+
+  window.addEventListener('resize', syncResponsiveUi);
+  window.addEventListener('orientationchange', () => {
+    updateUserLocationRendering();
+    syncResponsiveUi();
+  });
 
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
@@ -170,6 +206,10 @@ async function bootstrap() {
     renderChatMessages();
     syncSelectLabels();
     updateUseMyLocationState();
+    syncPlannerControls();
+    updateCompareButtonVisibility();
+    syncLocateButtonState();
+    syncResponsiveUi();
     await loadLiveLayer();
     startLocationTracking();
 
@@ -215,9 +255,10 @@ function initMap() {
       renderLiveLayer(state.liveData);
     }
   });
-  state.map.on('dragstart', () => {
-    state.followUser = false;
-  });
+  state.map.on('dragstart', onManualMapInteraction);
+  state.map.on('movestart', onManualMapInteraction);
+  state.map.on('zoomstart', onManualMapInteraction);
+  state.map.on('click', onMapIncidentClick);
 
   state.liveLayer = L.layerGroup().addTo(state.map);
   state.routeLayer = L.layerGroup().addTo(state.map);
@@ -244,6 +285,7 @@ function createMapPanes() {
   }
 
   state.map.getPane('incidents-heat-pane').style.pointerEvents = 'none';
+  state.map.getPane('incidents-pane').style.pointerEvents = 'auto';
 }
 
 async function loadLiveLayer() {
@@ -312,6 +354,7 @@ function onSelectOptionClick(event) {
 
 function renderLiveLayer(data) {
   state.liveLayer.clearLayers();
+  state.renderedIncidentEvents = [];
 
   if (state.liveHeatLayer) {
     state.map.removeLayer(state.liveHeatLayer);
@@ -347,38 +390,75 @@ function renderLiveLayer(data) {
     },
   ).addTo(state.map);
 
-  if (state.map.getZoom() < 14.2) {
+  const zoom = state.map.getZoom();
+  if (zoom < 12.6) {
     return;
   }
 
+  const popupOptions = {
+    className: 'incident-popup-shell',
+    maxWidth: isCompactViewport() ? 260 : 320,
+    keepInView: true,
+    autoPanPaddingTopLeft: L.point(20, isCompactViewport() ? 84 : 24),
+    autoPanPaddingBottomRight: L.point(20, isCompactViewport() ? 188 : 44),
+  };
+
+  const visibleLimit = zoom >= 15.2 ? 140 : zoom >= 14.2 ? 110 : zoom >= 13.4 ? 72 : 36;
+  const tapRadius = isCompactViewport() ? 20 : 16;
+
   const visibleEvents = [...weightedEvents]
     .sort((a, b) => (b.weight || 0) - (a.weight || 0))
-    .slice(0, 120);
+    .slice(0, visibleLimit);
+  state.renderedIncidentEvents = visibleEvents;
 
   for (const event of visibleEvents) {
-    const glow = L.circleMarker([event.lat, event.lng], {
+    const popupHtml = createIncidentPopupHtml(event);
+    const marker = L.marker([event.lat, event.lng], {
       pane: 'incidents-pane',
-      radius: 5 + event.weight * 6,
-      stroke: false,
-      fillColor: incidentGlowColor(event.weight),
-      fillOpacity: 0.04,
-      interactive: false,
+      keyboard: false,
+      riseOnHover: true,
+      icon: createIncidentMarkerIcon(event.weight, tapRadius),
     });
 
-    const marker = L.circleMarker([event.lat, event.lng], {
-      pane: 'incidents-pane',
-      radius: 1.5 + event.weight * 2.4,
-      color: 'rgba(255,255,255,0.12)',
-      fillColor: incidentCoreColor(event.weight),
-      fillOpacity: 0.28,
-      opacity: 0.22,
-      weight: 1,
-    });
-
-    marker.bindPopup(createIncidentPopupHtml(event));
-    glow.addTo(state.liveLayer);
+    marker.bindPopup(popupHtml, popupOptions);
+    marker.on('click', () => marker.openPopup());
     marker.addTo(state.liveLayer);
   }
+}
+
+function onMapIncidentClick(event) {
+  if (!state.renderedIncidentEvents.length || state.map.getZoom() < 12.6) {
+    return;
+  }
+
+  const clickPoint = state.map.latLngToContainerPoint(event.latlng);
+  const maxDistance = isCompactViewport() ? 28 : 22;
+  let closestEvent = null;
+  let closestDistance = Infinity;
+
+  for (const incident of state.renderedIncidentEvents) {
+    const incidentPoint = state.map.latLngToContainerPoint([incident.lat, incident.lng]);
+    const distance = clickPoint.distanceTo(incidentPoint);
+    if (distance <= maxDistance && distance < closestDistance) {
+      closestEvent = incident;
+      closestDistance = distance;
+    }
+  }
+
+  if (!closestEvent) {
+    return;
+  }
+
+  L.popup({
+    className: 'incident-popup-shell',
+    maxWidth: isCompactViewport() ? 260 : 320,
+    keepInView: true,
+    autoPanPaddingTopLeft: L.point(20, isCompactViewport() ? 84 : 24),
+    autoPanPaddingBottomRight: L.point(20, isCompactViewport() ? 188 : 44),
+  })
+    .setLatLng([closestEvent.lat, closestEvent.lng])
+    .setContent(createIncidentPopupHtml(closestEvent))
+    .openOn(state.map);
 }
 
 function startLocationTracking() {
@@ -399,8 +479,10 @@ function startLocationTracking() {
         if (state.comparison) {
           focusActiveRoute(true);
         } else {
-          state.map.setView([state.currentPosition.lat, state.currentPosition.lng], Math.max(state.map.getZoom(), 15), {
-            animate: true,
+          runProgrammaticMapMove(() => {
+            state.map.setView([state.currentPosition.lat, state.currentPosition.lng], Math.max(state.map.getZoom(), 15), {
+              animate: true,
+            });
           });
         }
       }
@@ -487,8 +569,12 @@ async function requestHeadingAccess() {
     window.removeEventListener('deviceorientation', onDeviceOrientation);
     window.addEventListener('deviceorientationabsolute', onDeviceOrientation);
     window.addEventListener('deviceorientation', onDeviceOrientation);
+    state.headingEnabled = true;
+    syncCompassButtonState();
     setStatus('Phone heading linked.');
   } catch (error) {
+    state.headingEnabled = false;
+    syncCompassButtonState();
     setStatus(error.message || 'Unable to enable heading.');
   }
 }
@@ -497,22 +583,27 @@ function onDeviceOrientation(event) {
   const nextHeading = Number.isFinite(event.webkitCompassHeading)
     ? event.webkitCompassHeading
     : Number.isFinite(event.alpha)
-      ? (360 - event.alpha + 360) % 360
+      ? (360 - event.alpha + getScreenOrientationAngle() + 360) % 360
       : null;
 
   if (!Number.isFinite(nextHeading)) return;
   state.heading = nextHeading;
+  state.headingEnabled = true;
+  syncCompassButtonState();
   updateUserLocationRendering();
 }
 
 function recenterOnUser() {
   state.followUser = true;
+  syncLocateButtonState();
   if (!state.currentPosition) {
     setStatus('Waiting for your location.');
     return;
   }
-  state.map.setView([state.currentPosition.lat, state.currentPosition.lng], Math.max(state.map.getZoom(), 15), {
-    animate: true,
+  runProgrammaticMapMove(() => {
+    state.map.setView([state.currentPosition.lat, state.currentPosition.lng], Math.max(state.map.getZoom(), 15), {
+      animate: true,
+    });
   });
 }
 
@@ -526,17 +617,21 @@ function updateUseMyLocationState() {
   if (state.useMyLocation && state.currentPosition) {
     els.originInput.value = 'My location';
     els.originField.classList.add('hidden');
+    syncPlannerControls();
     return;
   }
 
   if (!state.useMyLocation && els.originInput.value === 'My location') {
     els.originInput.value = '';
   }
+
+  syncPlannerControls();
 }
 
 function toggleOriginField() {
   const nextHidden = !els.originField.classList.contains('hidden');
   els.originField.classList.toggle('hidden', nextHidden);
+  syncPlannerControls();
   if (!nextHidden) {
     state.useMyLocation = false;
     updateUseMyLocationState();
@@ -556,6 +651,13 @@ function swapLocations() {
   state.selectedPlaces.destination = selectedOrigin;
   els.originField.classList.remove('hidden');
   updateUseMyLocationState();
+  syncPlannerControls();
+  updateCompareButtonVisibility();
+}
+
+function syncPlannerControls() {
+  const showInlineSwap = !els.originField.classList.contains('hidden');
+  els.inlineSwapRow.classList.toggle('hidden', !showInlineSwap);
 }
 
 function queueSuggestions(field) {
@@ -590,9 +692,10 @@ function queueSuggestions(field) {
 function renderSuggestions(field, results) {
   const container = els[`${field}Suggestions`];
   container.innerHTML = '';
-  container.classList.toggle('hidden', results.length === 0);
+  const visibleResults = results.slice(0, 8);
+  container.classList.toggle('hidden', visibleResults.length === 0);
 
-  for (const [index, place] of results.entries()) {
+  for (const [index, place] of visibleResults.entries()) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'suggestion-item';
@@ -618,6 +721,15 @@ function onSuggestionPick(event) {
   state.selectedPlaces[field] = place;
   els[`${field}Input`].value = place.label;
   renderSuggestions(field, []);
+  if (field === 'destination') {
+    updateCompareButtonVisibility();
+  }
+}
+
+function updateCompareButtonVisibility() {
+  const hasDestination = Boolean(els.destinationInput.value.trim());
+  els.compareButton.classList.toggle('hidden', !hasDestination);
+  els.compareButton.disabled = !hasDestination;
 }
 
 async function onCompareRoute(event) {
@@ -663,6 +775,7 @@ async function onCompareRoute(event) {
     state.comparison = enrichComparison(comparison);
     state.activeRouteKey = 'safer';
     state.followUser = true;
+    state.navSheetExpanded = !isCompactViewport();
     renderNavigation();
     updateNavigationMetrics();
     toggleSheet('chat', false);
@@ -734,6 +847,7 @@ function renderNavigation() {
 
   state.routeLayer.clearLayers();
   els.navCard.classList.remove('hidden');
+  syncNavigationSheetState();
   syncShellState();
   els.saferRouteButton.classList.toggle('active', state.activeRouteKey === 'safer');
   els.fastestRouteButton.classList.toggle('active', state.activeRouteKey === 'fastest');
@@ -750,7 +864,7 @@ function renderNavigation() {
   }
 
   renderRoutePins();
-  focusActiveRoute(false);
+  focusActiveRoute(Boolean(state.currentPosition && state.followUser));
 }
 
 function drawSecondaryRoute(latLngs, color) {
@@ -839,9 +953,12 @@ function updateNavigationMetrics() {
   els.distanceRemaining.textContent = `${formatDistance(progress.remainingDistanceMeters)} left`;
   els.riskSummary.textContent = `Risk ${route.risk.riskScore}/100`;
   els.nextInstruction.textContent = progress.nextInstruction;
+  els.routeProgressFill.style.width = `${Math.round(progress.completionRatio * 100)}%`;
+  els.routeProgressLabel.textContent =
+    progress.completionRatio >= 0.98 ? 'Almost there' : `${Math.round(progress.completionRatio * 100)}% completed`;
 
-  if (!state.activeSheet) {
-    focusActiveRoute(Boolean(state.currentPosition && state.followUser));
+  if (!state.activeSheet && state.followUser) {
+    focusActiveRoute(Boolean(state.currentPosition));
   }
 }
 
@@ -851,19 +968,26 @@ function focusActiveRoute(preferFollowUser) {
   const route = state.comparison.routes[state.activeRouteKey];
   if (!route?.latLngs?.length) return;
 
-  const bounds = L.latLngBounds(route.latLngs);
-  if (state.currentPosition) {
+  const progress = state.currentPosition ? computeRouteProgress(route, state.currentPosition) : null;
+  const focusPoints = preferFollowUser && progress
+    ? [[state.currentPosition.lat, state.currentPosition.lng], ...route.latLngs.slice(progress.closestIndex)]
+    : route.latLngs;
+
+  const bounds = L.latLngBounds(focusPoints.length ? focusPoints : route.latLngs);
+  if (state.currentPosition && !preferFollowUser) {
     bounds.extend([state.currentPosition.lat, state.currentPosition.lng]);
   }
 
   const topPadding = state.activeSheet ? 88 : 190;
   const bottomPadding = state.activeSheet ? 28 : 36;
 
-  state.map.fitBounds(bounds.pad(0.14), {
-    animate: true,
-    paddingTopLeft: [18, topPadding],
-    paddingBottomRight: [18, bottomPadding],
-    maxZoom: preferFollowUser ? 16.2 : 17,
+  runProgrammaticMapMove(() => {
+    state.map.fitBounds(bounds.pad(0.14), {
+      animate: true,
+      paddingTopLeft: [18, topPadding],
+      paddingBottomRight: [18, bottomPadding],
+      maxZoom: preferFollowUser ? 16.2 : 17,
+    });
   });
 }
 
@@ -874,6 +998,8 @@ function computeRouteProgress(route, position) {
     return {
       remainingDistanceMeters: totalDistance,
       remainingSeconds: totalDuration,
+      completionRatio: 0,
+      closestIndex: 0,
       nextInstruction: route.steps[0]?.instruction || 'Head to destination',
     };
   }
@@ -892,20 +1018,31 @@ function computeRouteProgress(route, position) {
   const travelledMeters = route.cumulativeDistances[bestIndex] || 0;
   const remainingDistanceMeters = Math.max(totalDistance - travelledMeters, 0);
   const remainingSeconds = totalDuration * (remainingDistanceMeters / totalDistance);
-  const nextInstruction = route.steps.find((step) => step.cumulativeDistance > travelledMeters + 25)?.instruction || 'Arrive at destination';
+  const completionRatio = clamp(travelledMeters / totalDistance, 0, 1);
+  const nextInstruction = minDistance > 70
+    ? 'Move back toward the highlighted route'
+    : route.steps.find((step) => step.cumulativeDistance > travelledMeters + 25)?.instruction || 'Arrive at destination';
 
   return {
     remainingDistanceMeters,
     remainingSeconds,
+    completionRatio,
+    closestIndex: bestIndex,
     nextInstruction,
   };
 }
 
 function clearNavigation() {
   state.comparison = null;
+  state.followUser = true;
+  state.navSheetExpanded = false;
   state.routeLayer.clearLayers();
   els.navCard.classList.add('hidden');
   els.nextInstruction.textContent = 'Choose a destination to start.';
+  els.routeProgressFill.style.width = '0%';
+  els.routeProgressLabel.textContent = '0% completed';
+  state.bottomSheetExpanded = false;
+  syncLocateButtonState();
   syncShellState();
 }
 
@@ -913,7 +1050,7 @@ function toggleSheet(type, open) {
   state.activeSheet = open ? type : state.activeSheet === type ? null : state.activeSheet;
   syncShellState();
 
-  if (!state.activeSheet && state.comparison) {
+  if (!state.activeSheet && state.comparison && state.followUser) {
     focusActiveRoute(Boolean(state.currentPosition && state.followUser));
   }
 }
@@ -923,7 +1060,7 @@ function closeActiveSheet() {
   state.activeSheet = null;
   syncShellState();
 
-  if (state.comparison) {
+  if (state.comparison && state.followUser) {
     focusActiveRoute(Boolean(state.currentPosition && state.followUser));
   }
 }
@@ -941,8 +1078,11 @@ function syncShellState() {
   els.settingsSheet.classList.toggle('hidden', activeSheet !== 'settings');
   els.chatSheet.classList.toggle('hidden', activeSheet !== 'chat');
   els.reportSheet.classList.toggle('hidden', activeSheet !== 'report');
+  els.navTopHud.classList.toggle('hidden', !hasRoute || Boolean(activeSheet));
   els.sheetBackdrop.classList.toggle('hidden', !activeSheet);
   els.bottomSheet.classList.toggle('hidden', hasRoute);
+  syncNavigationSheetState();
+  syncResponsiveUi();
 }
 
 async function onAskAi(event) {
@@ -1093,6 +1233,94 @@ function renderReports() {
   }
 }
 
+function onManualMapInteraction() {
+  if (Date.now() < state.programmaticMoveUntil) return;
+  if (!state.followUser) return;
+  state.followUser = false;
+  syncLocateButtonState();
+}
+
+function runProgrammaticMapMove(callback) {
+  state.programmaticMoveUntil = Date.now() + 1400;
+  callback();
+}
+
+function syncLocateButtonState() {
+  els.locateButton.classList.toggle('active', state.followUser);
+}
+
+function syncCompassButtonState() {
+  return;
+}
+
+function isCompactViewport() {
+  return window.matchMedia('(max-width: 640px)').matches;
+}
+
+function syncResponsiveUi() {
+  const mobilePlannerVisible = isCompactViewport() && !state.comparison && !state.activeSheet;
+  if (!mobilePlannerVisible) {
+    state.bottomSheetExpanded = true;
+  }
+
+  els.appShell.classList.toggle('mobile-sheet-mode', mobilePlannerVisible);
+  els.appShell.classList.toggle('mobile-sheet-collapsed', mobilePlannerVisible && !state.bottomSheetExpanded);
+  els.appShell.classList.toggle('mobile-sheet-expanded', mobilePlannerVisible && state.bottomSheetExpanded);
+}
+
+function syncNavigationSheetState() {
+  const mobileNavVisible = isCompactViewport() && Boolean(state.comparison) && !state.activeSheet;
+  if (!mobileNavVisible && state.comparison) {
+    state.navSheetExpanded = true;
+  }
+
+  els.appShell.classList.toggle('mobile-nav-mode', mobileNavVisible);
+  els.appShell.classList.toggle('mobile-nav-collapsed', mobileNavVisible && !state.navSheetExpanded);
+  els.appShell.classList.toggle('mobile-nav-expanded', mobileNavVisible && state.navSheetExpanded);
+}
+
+function setBottomSheetExpanded(expanded) {
+  if (!isCompactViewport() || state.comparison || state.activeSheet) return;
+  state.bottomSheetExpanded = expanded;
+  syncResponsiveUi();
+}
+
+function setNavSheetExpanded(expanded) {
+  if (!isCompactViewport() || !state.comparison || state.activeSheet) return;
+  state.navSheetExpanded = expanded;
+  syncNavigationSheetState();
+}
+
+function onBottomSheetTouchStart(event) {
+  state.bottomSheetTouchStartY = event.touches[0]?.clientY ?? null;
+}
+
+function onBottomSheetTouchEnd(event) {
+  if (state.bottomSheetTouchStartY === null) return;
+
+  const endY = event.changedTouches[0]?.clientY ?? state.bottomSheetTouchStartY;
+  const deltaY = endY - state.bottomSheetTouchStartY;
+  state.bottomSheetTouchStartY = null;
+
+  if (Math.abs(deltaY) < 28) return;
+  setBottomSheetExpanded(deltaY < 0);
+}
+
+function onNavSheetTouchStart(event) {
+  state.navSheetTouchStartY = event.touches[0]?.clientY ?? null;
+}
+
+function onNavSheetTouchEnd(event) {
+  if (state.navSheetTouchStartY === null) return;
+
+  const endY = event.changedTouches[0]?.clientY ?? state.navSheetTouchStartY;
+  const deltaY = endY - state.navSheetTouchStartY;
+  state.navSheetTouchStartY = null;
+
+  if (Math.abs(deltaY) < 28) return;
+  setNavSheetExpanded(deltaY < 0);
+}
+
 function severityToWeight(severity) {
   return clamp((Number(severity || 0) - 0.25) / 1.75, 0, 1);
 }
@@ -1109,14 +1337,45 @@ function incidentCoreColor(weight) {
   return '#fde047';
 }
 
+function createIncidentMarkerIcon(weight, tapRadius) {
+  const coreSize = Math.round(9 + weight * 8);
+  const haloSize = Math.round(coreSize + 10);
+  const hitSize = Math.max(tapRadius * 2, haloSize + 8);
+
+  return L.divIcon({
+    className: 'incident-hit-icon',
+    html: `
+      <span
+        class="incident-hit-marker"
+        style="--incident-hit-size:${hitSize}px;--incident-core-size:${coreSize}px;--incident-halo-size:${haloSize}px;--incident-core:${incidentCoreColor(weight)};--incident-halo:${incidentGlowColor(weight)};"
+      >
+        <span class="incident-hit-marker__halo"></span>
+        <span class="incident-hit-marker__core"></span>
+      </span>
+    `,
+    iconSize: [hitSize, hitSize],
+    iconAnchor: [hitSize / 2, hitSize / 2],
+    popupAnchor: [0, -Math.round(hitSize / 2)],
+  });
+}
+
 function createIncidentPopupHtml(event) {
+  const severityLabel = event.weight >= 0.8 ? 'High' : event.weight >= 0.45 ? 'Elevated' : 'Watch';
+  const severityClass = event.weight >= 0.8 ? 'high' : event.weight >= 0.45 ? 'medium' : 'low';
+
   return `
     <div class="incident-popup">
-      <strong>${escapeHtml(event.primaryType)}</strong><br />
-      ${event.secondaryType ? `${escapeHtml(event.secondaryType)}<br />` : ''}
-      ${event.neighborhood ? `${escapeHtml(event.neighborhood)}<br />` : ''}
-      ${event.timestamp ? `${new Date(event.timestamp).toLocaleString()}<br />` : ''}
-      Weight ${event.weight.toFixed(2)}
+      <div class="incident-popup-head">
+        <strong>${escapeHtml(event.primaryType)}</strong>
+        <span class="incident-severity ${severityClass}">${severityLabel}</span>
+      </div>
+      ${event.secondaryType ? `<p>${escapeHtml(event.secondaryType)}</p>` : ''}
+      <div class="incident-popup-meta">
+        ${event.source ? `<span>${escapeHtml(titleCase(event.source))}</span>` : ''}
+        ${event.neighborhood ? `<span>${escapeHtml(event.neighborhood)}</span>` : ''}
+        ${event.timestamp ? `<span>${new Date(event.timestamp).toLocaleString()}</span>` : ''}
+      </div>
+      <div class="incident-popup-note">Recent signal strength ${event.weight.toFixed(2)}</div>
     </div>
   `;
 }
@@ -1204,8 +1463,26 @@ function formatRelativeTime(isoString) {
   return `${hours}h ago`;
 }
 
+function getScreenOrientationAngle() {
+  if (typeof screen !== 'undefined' && screen.orientation && Number.isFinite(screen.orientation.angle)) {
+    return screen.orientation.angle;
+  }
+  if (typeof window.orientation === 'number') {
+    return window.orientation;
+  }
+  return 0;
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function titleCase(value) {
+  return String(value)
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 function escapeHtml(value) {

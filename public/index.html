@@ -26,13 +26,19 @@
     <meta name="twitter:image" content="__SHARE_IMAGE_URL__" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <link rel="apple-touch-icon" href="/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin=""
     />
-    <link rel="stylesheet" href="/styles.css?v=20260314-mobile-fix3" />
+    <link rel="stylesheet" href="/styles.css?v=20260316-ui-refresh1" />
   </head>
   <body>
     <div id="appShell" class="app-shell">
@@ -40,19 +46,24 @@
       <div id="statusText" class="sr-only" aria-live="polite">Live city guidance</div>
       <button id="sheetBackdrop" class="sheet-backdrop hidden" type="button" aria-label="Close panel"></button>
 
-      <header class="top-hud top-actions-only">
+      <header id="navTopHud" class="top-hud hidden">
         <div class="hud-actions hud-actions-top">
-          <button id="settingsButton" class="top-action-button settings" type="button" aria-label="Open settings panel">
+          <button id="navReportButton" class="top-action-button nav-report-button" type="button" aria-label="Report an incident">
             <svg class="top-action-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 0 1-2.8 0 2 2 0 0 1 0-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 0 1 0-2.8 2 2 0 0 1 2.8 0l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 0 1 2.8 0 2 2 0 0 1 0 2.8l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6h.2a2 2 0 0 1 0 4h-.2a1 1 0 0 0-.9.6Z"></path>
+              <path d="M12 4 21 20H3L12 4Z"></path>
+              <path d="M12 9v5"></path>
+              <circle cx="12" cy="17" r="1"></circle>
             </svg>
-            <span class="sr-only">Settings</span>
+            <span class="nav-report-label">Report</span>
+            <span class="sr-only">Report</span>
           </button>
         </div>
       </header>
 
       <section id="navCard" class="nav-card hidden">
+        <button id="navSheetHandle" class="sheet-handle nav-sheet-handle" type="button" aria-label="Expand route details">
+          <span class="sheet-handle-bar"></span>
+        </button>
         <div class="nav-top">
           <div>
             <span id="routeModeLabel" class="nav-label">Safer route</span>
@@ -64,6 +75,12 @@
           <span id="distanceRemaining">-- km left</span>
           <span id="riskSummary">Risk --</span>
         </div>
+        <div class="route-progress-shell" aria-hidden="true">
+          <div class="route-progress-track">
+            <div id="routeProgressFill" class="route-progress-fill"></div>
+          </div>
+          <span id="routeProgressLabel" class="route-progress-label">0% completed</span>
+        </div>
         <p id="nextInstruction" class="nav-instruction">Choose a destination to start.</p>
         <div class="nav-actions">
           <button id="saferRouteButton" class="segment-button active" type="button">Safer</button>
@@ -72,11 +89,14 @@
       </section>
 
       <section id="bottomSheet" class="bottom-sheet">
+        <button id="bottomSheetHandle" class="sheet-handle" type="button" aria-label="Expand route planner">
+          <span class="sheet-handle-bar"></span>
+        </button>
         <form id="routeForm" class="search-card" autocomplete="off">
           <div class="origin-row">
             <button id="useMyLocationButton" class="pill-button active" type="button">My location</button>
             <button id="originToggleButton" class="pill-button" type="button">Origin</button>
-            <button id="swapButton" class="pill-button" type="button">Swap</button>
+            <button id="settingsButton" class="pill-button" type="button">Settings</button>
           </div>
 
           <div id="originField" class="field-stack hidden">
@@ -84,12 +104,32 @@
             <div id="originSuggestions" class="suggestions hidden"></div>
           </div>
 
+          <div id="inlineSwapRow" class="inline-swap-row hidden">
+            <button id="swapButton" class="inline-swap-button" type="button" aria-label="Swap origin and destination">
+              <span aria-hidden="true">↕</span>
+            </button>
+          </div>
+
           <div class="field-stack destination-field">
             <input id="destinationInput" name="destination" placeholder="Where to?" required />
             <div id="destinationSuggestions" class="suggestions hidden"></div>
           </div>
 
-          <div class="meta-row">
+          <button id="compareButton" class="primary-button" type="submit">Start</button>
+        </form>
+      </section>
+
+      <section id="settingsSheet" class="overlay-sheet hidden">
+        <div class="sheet-head">
+          <strong>Settings</strong>
+          <button id="settingsCloseButton" class="ghost-button" type="button">Close</button>
+        </div>
+        <div class="settings-quick-actions">
+          <button id="locateButton" class="settings-inline-button" type="button">My position</button>
+        </div>
+        <div class="settings-filters">
+          <label class="sheet-field">
+            <span>Live window</span>
             <div class="custom-select" data-select="hours">
               <select id="hoursSelect" class="sr-only" aria-label="Live window">
                 <option value="6">6h</option>
@@ -109,6 +149,9 @@
                 <button class="select-option" type="button" data-select="hours" data-value="72">72h</button>
               </div>
             </div>
+          </label>
+          <label class="sheet-field">
+            <span>Live source</span>
             <div class="custom-select" data-select="source">
               <select id="sourceSelect" class="sr-only" aria-label="Source layer">
                 <option value="all" selected>All</option>
@@ -124,9 +167,8 @@
                 <button class="select-option" type="button" data-select="source" data-value="incidents">Incidents</button>
               </div>
             </div>
-          </div>
-
-          <label class="severity-switch" for="violentOnlyInput">
+          </label>
+          <label class="severity-switch settings-severity-switch" for="violentOnlyInput">
             <span class="severity-copy">
               <strong>Highest severity only</strong>
               <small>Focus on the strongest recent signals</small>
@@ -136,15 +178,6 @@
               <span class="switch-track"><span class="switch-thumb"></span></span>
             </span>
           </label>
-
-          <button id="compareButton" class="primary-button" type="submit">Start safer route</button>
-        </form>
-      </section>
-
-      <section id="settingsSheet" class="overlay-sheet hidden">
-        <div class="sheet-head">
-          <strong>Settings</strong>
-          <button id="settingsCloseButton" class="ghost-button" type="button">Close</button>
         </div>
         <div class="settings-actions">
           <button id="settingsReportButton" class="sheet-action-button" type="button">
@@ -187,7 +220,6 @@
               <strong id="incidentEvents">--</strong>
             </article>
           </div>
-          <p class="settings-note">Risk scores use recent public-safety signals, time decay, and route proximity. This is guidance, not a guarantee of safety.</p>
         </div>
       </section>
 
@@ -233,6 +265,6 @@
       crossorigin=""
     ></script>
     <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-    <script src="/app.js?v=20260314-mobile-fix3"></script>
+    <script src="/app.js?v=20260316-ui-refresh1"></script>
   </body>
 </html>

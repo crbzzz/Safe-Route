@@ -847,14 +847,14 @@ function scoreRoute(route, events) {
   }
   const distanceKm = Math.max((route.distance || 0) / 1000, 0.25);
   const densityScore = rawRisk / Math.pow(distanceKm, 0.75);
+  const preliminaryRisk =
+    densityScore * 9 +
+    proximityBursts * 2.5 +
+    blockingHazardScore * 5.5 +
+    severeCorridorCount * 3.5 +
+    legacyDangerBursts * 4.5;
   const riskScore = clamp(
-    Math.round(
-      densityScore * 14 +
-      proximityBursts * 4 +
-      blockingHazardScore * 9 +
-      severeCorridorCount * 6 +
-      legacyDangerBursts * 8,
-    ),
+    Math.round(Math.pow(Math.max(preliminaryRisk, 0), 0.9) * 0.82),
     0,
     100,
   );
@@ -921,7 +921,7 @@ function chooseRoutePair(scoredRoutes) {
     .filter((route) =>
       route.risk.severeCorridorCount < fastest.risk.severeCorridorCount ||
       route.risk.blockingHazardScore <= fastest.risk.blockingHazardScore - 1.5 ||
-      route.risk.riskScore <= fastest.risk.riskScore - 8,
+      route.risk.riskScore <= fastest.risk.riskScore - 5,
     )
     .sort((a, b) =>
       a.risk.severeCorridorCount - b.risk.severeCorridorCount ||
