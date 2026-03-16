@@ -2243,12 +2243,20 @@ textarea,
   overflow-x: hidden !important;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
 }
 
 @media (max-width: 640px) {
   #settingsSheet {
-    max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    top: max(10px, env(safe-area-inset-top));
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    left: 16px;
+    right: 16px;
+    width: auto;
+    max-height: none;
+    padding-bottom: calc(18px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(18px + env(safe-area-inset-bottom));
   }
 }
 

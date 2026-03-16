@@ -391,7 +391,7 @@ function renderLiveLayer(data) {
   ).addTo(state.map);
 
   const zoom = state.map.getZoom();
-  if (zoom < 12.6) {
+  if (zoom < 14.6) {
     return;
   }
 
@@ -403,12 +403,12 @@ function renderLiveLayer(data) {
     autoPanPaddingBottomRight: L.point(20, isCompactViewport() ? 188 : 44),
   };
 
-  const visibleLimit = zoom >= 15.2 ? 140 : zoom >= 14.2 ? 110 : zoom >= 13.4 ? 72 : 36;
   const tapRadius = isCompactViewport() ? 20 : 16;
+  const minVisibleWeight = getMinVisibleIncidentWeight(zoom);
 
   const visibleEvents = [...weightedEvents]
-    .sort((a, b) => (b.weight || 0) - (a.weight || 0))
-    .slice(0, visibleLimit);
+    .filter((event) => (event.weight || 0) >= minVisibleWeight)
+    .sort((a, b) => (b.weight || 0) - (a.weight || 0));
   state.renderedIncidentEvents = visibleEvents;
 
   for (const event of visibleEvents) {
@@ -1323,6 +1323,14 @@ function onNavSheetTouchEnd(event) {
 
 function severityToWeight(severity) {
   return clamp((Number(severity || 0) - 0.25) / 1.75, 0, 1);
+}
+
+function getMinVisibleIncidentWeight(zoom) {
+  if (zoom < 15.1) return 0.98;
+  if (zoom < 15.6) return 0.9;
+  if (zoom < 16.1) return 0.74;
+  if (zoom < 16.6) return 0.52;
+  return 0;
 }
 
 function incidentGlowColor(weight) {

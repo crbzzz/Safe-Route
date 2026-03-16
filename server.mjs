@@ -379,6 +379,21 @@ function toNumber(value) {
 function normalizeText(value) {
   return value == null ? '' : String(value).trim();
 }
+
+function normalizeList(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeText(entry)).filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(/[;,|]/)
+      .map((entry) => normalizeText(entry))
+      .filter(Boolean);
+  }
+
+  return [];
+}
 function parseDate(value) {
   if (!value) return null;
   const date = new Date(value);
@@ -941,66 +956,254 @@ async function geocodeAddress(query) {
   }
 
   const q = /san\s+francisco/i.test(query) ? query : `${query}, San Francisco, CA`;
+  const nominatimQuery = /san\s+francisco/i.test(query) ? query : `${query} San Francisco`;
+  const queryTokens = normalizeText(query)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((token) => token.length >= 2);
+  const categoryKeywords = ['bar', 'club', 'nightclub', 'restaurant', 'cafe', 'coffee', 'park', 'museum', 'hotel'];
+  const poiCategories = new Set(['amenity', 'leisure', 'tourism', 'shop', 'historic', 'emergency', 'healthcare']);
 
   // BBox approximative de San Francisco
   const SF_BBOX = '-122.55,37.68,-122.35,37.84';
   // Proximity centrée sur downtown SF
   const SF_PROXIMITY = '-122.4194,37.7749';
 
-  const buildUrl = (types) => {
+  const buildUrl = (types, limit = 8) => {
     const url = new URL('https://api.mapbox.com/search/geocode/v6/forward');
     url.searchParams.set('q', q);
-    url.searchParams.set('limit', '5');
+    url.searchParams.set('limit', String(limit));
     url.searchParams.set('access_token', MAPBOX_ACCESS_TOKEN);
     url.searchParams.set('bbox', SF_BBOX);
     url.searchParams.set('proximity', SF_PROXIMITY);
     url.searchParams.set('country', 'US');
     url.searchParams.set('language', 'en');
+    url.searchParams.set('autocomplete', 'true');
     if (types) {
       url.searchParams.set('types', types);
     }
     return url;
   };
 
-  let data;
-  try {
-    data = await fetchJson(buildUrl('poi,address,street,place,neighborhood,locality').toString());
-  } catch {
-    data = await fetchJson(buildUrl('address,street,place,neighborhood,locality').toString());
-  }
-
-  const features = Array.isArray(data.features) ? data.features : [];
-
   function isInsideSf(lng, lat) {
     return lng >= -122.55 && lng <= -122.35 && lat >= 37.68 && lat <= 37.84;
   }
 
-  return features.map((feature) => {
+  function buildFeatureKey(label, lng, lat) {
+    return `${label.toLowerCase()}::${lng.toFixed(5)}::${lat.toFixed(5)}`;
+  }
+
+  function titleCaseLabel(value) {
+    return normalizeText(value)
+      .split(/\s+/)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+
+  function humanizeCategory(value) {
+    return titleCaseLabel(normalizeText(value).replaceAll('_', ' '));
+  }
+
+  function getFeatureCategories(feature) {
+    const properties = feature?.properties || {};
+    const categories = [
+      ...normalizeList(properties.poi_category),
+      ...normalizeList(properties.poi_categories),
+      ...normalizeList(properties.category),
+      ...normalizeList(properties.categories),
+    ];
+
+    return [...new Set(categories.map((category) => titleCaseLabel(category)))].slice(0, 3);
+  }
+
+  function buildSubtitle(feature, categories) {
+    const properties = feature?.properties || {};
+    const address = normalizeText(properties.full_address || feature.place_formatted || feature.place_name);
+    const locality = normalizeText(
+      properties.context?.place?.name ||
+      properties.context?.locality?.name ||
+      properties.context?.neighborhood?.name,
+    );
+
+    const parts = [...categories];
+    if (locality && !parts.includes(locality)) {
+      parts.push(locality);
+    }
+    if (address && !parts.includes(address)) {
+      parts.push(address);
+    }
+
+    return parts.filter(Boolean).slice(0, 3).join(' • ');
+  }
+
+  function normalizeFeature(feature) {
     const coords = Array.isArray(feature?.geometry?.coordinates)
       ? feature.geometry.coordinates
       : Array.isArray(feature?.center)
         ? feature.center
         : [null, null];
+    const lng = Number(coords[0]);
+    const lat = Number(coords[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !isInsideSf(lng, lat)) {
+      return null;
+    }
+
+    const properties = feature?.properties || {};
+    const label =
+      normalizeText(properties.name_preferred) ||
+      normalizeText(properties.name) ||
+      normalizeText(properties.full_address) ||
+      normalizeText(feature.place_formatted) ||
+      normalizeText(feature.place_name) ||
+      'Unknown address';
+    const categories = getFeatureCategories(feature);
+    const subtitle = buildSubtitle(feature, categories);
+    const kind = normalizeText(properties.feature_type || feature.feature_type || '').toLowerCase() || (categories.length ? 'poi' : 'address');
+    const searchableText = [label, subtitle, categories.join(' ')].join(' ').toLowerCase();
+
+    let relevance = Number(properties?.match_code?.confidence ?? feature?.relevance ?? 0);
+    if (kind === 'poi' || categories.length) {
+      relevance += 0.22;
+    }
+    if (searchableText.startsWith(normalizeText(query).toLowerCase())) {
+      relevance += 0.35;
+    } else if (searchableText.includes(normalizeText(query).toLowerCase())) {
+      relevance += 0.18;
+    }
+
+    const tokenMatches = queryTokens.filter((token) => searchableText.includes(token)).length;
+    relevance += Math.min(tokenMatches * 0.07, 0.28);
+
+    if (queryTokens.some((token) => categoryKeywords.includes(token)) && categories.length) {
+      relevance += 0.12;
+    }
 
     return {
-      label:
-        feature.properties?.name ||
-        feature.properties?.full_address ||
-        feature.place_formatted ||
-        feature.place_name ||
-        'Unknown address',
-      subtitle:
-        feature.properties?.full_address ||
-        feature.place_formatted ||
-        feature.properties?.context?.place?.name ||
-        '',
-      lng: Number(coords[0]),
-      lat: Number(coords[1]),
-      relevance: Number(feature?.properties?.match_code?.confidence ?? 0),
+      label,
+      subtitle,
+      lng,
+      lat,
+      relevance,
+      kind,
+      key: buildFeatureKey(label, lng, lat),
     };
-  })
-  .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng))
-  .filter((item) => isInsideSf(item.lng, item.lat));
+  }
+
+  function normalizeNominatimFeature(feature) {
+    const lng = Number(feature?.lon);
+    const lat = Number(feature?.lat);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !isInsideSf(lng, lat)) {
+      return null;
+    }
+
+    const label =
+      normalizeText(feature?.name) ||
+      normalizeText(feature?.namedetails?.name) ||
+      normalizeText(String(feature?.display_name || '').split(',')[0]) ||
+      'Unknown place';
+    const category = normalizeText(feature?.category).toLowerCase();
+    const type = normalizeText(feature?.type).toLowerCase();
+    const categoryLabel = humanizeCategory(type || category);
+    const addressTail = String(feature?.display_name || '')
+      .split(',')
+      .slice(1, 4)
+      .map((part) => normalizeText(part))
+      .filter(Boolean)
+      .join(', ');
+    const subtitle = [categoryLabel, addressTail].filter(Boolean).join(' • ');
+    const searchableText = [label, subtitle, category, type].join(' ').toLowerCase();
+
+    let relevance = Number(feature?.importance ?? 0);
+    if (poiCategories.has(category)) {
+      relevance += 0.35;
+    }
+    if (searchableText.startsWith(normalizeText(query).toLowerCase())) {
+      relevance += 0.35;
+    } else if (searchableText.includes(normalizeText(query).toLowerCase())) {
+      relevance += 0.18;
+    }
+
+    const tokenMatches = queryTokens.filter((token) => searchableText.includes(token)).length;
+    relevance += Math.min(tokenMatches * 0.08, 0.32);
+
+    return {
+      label,
+      subtitle,
+      lng,
+      lat,
+      relevance,
+      kind: poiCategories.has(category) ? 'poi' : category || 'address',
+      key: buildFeatureKey(label, lng, lat),
+    };
+  }
+
+  const fetchSearch = async (types, limit) => {
+    try {
+      const data = await fetchJson(buildUrl(types, limit).toString());
+      return Array.isArray(data.features) ? data.features : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const fetchNominatimSearch = async () => {
+    try {
+      const url = new URL('https://nominatim.openstreetmap.org/search');
+      url.searchParams.set('format', 'jsonv2');
+      url.searchParams.set('q', nominatimQuery);
+      url.searchParams.set('limit', '8');
+      url.searchParams.set('bounded', '1');
+      url.searchParams.set('viewbox', '-122.55,37.84,-122.35,37.68');
+      url.searchParams.set('addressdetails', '1');
+      url.searchParams.set('namedetails', '1');
+
+      const data = await fetchJson(url.toString(), {
+        headers: {
+          'User-Agent': 'SafeRoute/1.0',
+        },
+      });
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const [poiFeatures, addressFeatures, nominatimFeatures] = await Promise.all([
+    fetchSearch('poi', 8),
+    fetchSearch('address,street,place,neighborhood,locality', 8),
+    fetchNominatimSearch(),
+  ]);
+
+  let results = [
+    ...poiFeatures.map((feature) => normalizeFeature(feature)),
+    ...addressFeatures.map((feature) => normalizeFeature(feature)),
+    ...nominatimFeatures.map((feature) => normalizeNominatimFeature(feature)),
+  ]
+    .filter(Boolean);
+
+  if (!results.length) {
+    results = (await fetchSearch('poi,address,street,place,neighborhood,locality', 8))
+      .map((feature) => normalizeFeature(feature))
+      .filter(Boolean);
+  }
+
+  const deduped = [];
+  const seen = new Set();
+  for (const result of results.sort((a, b) => b.relevance - a.relevance)) {
+    if (seen.has(result.key)) {
+      continue;
+    }
+    seen.add(result.key);
+    deduped.push({
+      label: result.label,
+      subtitle: result.subtitle,
+      lng: result.lng,
+      lat: result.lat,
+      relevance: result.relevance,
+    });
+  }
+
+  return deduped.slice(0, 8);
 }
 async function getDirections(origin, destination, waypoints = []) {
   if (!MAPBOX_ACCESS_TOKEN) {
@@ -1314,7 +1517,6 @@ const server = http.createServer(async (req, res) => {
         },
         events: events
           .sort((a, b) => (a.ageHours ?? 999) - (b.ageHours ?? 999))
-          .slice(0, 700)
           .map((event) => ({
             ...event,
             severity: riskWeight(event),
