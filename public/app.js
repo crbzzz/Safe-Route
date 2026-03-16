@@ -62,8 +62,9 @@ function bindElements() {
     'appShell',
     'sheetBackdrop',
     'statusText',
+    'navTopHud',
+    'navReportButton',
     'locateButton',
-    'compassButton',
     'settingsButton',
     'inlineSwapRow',
     'settingsSheet',
@@ -130,7 +131,6 @@ function attachEvents() {
   els.originToggleButton.addEventListener('click', toggleOriginField);
   els.swapButton.addEventListener('click', swapLocations);
   els.locateButton.addEventListener('click', recenterOnUser);
-  els.compassButton.addEventListener('click', requestHeadingAccess);
   els.hoursSelect.addEventListener('change', loadLiveLayer);
   els.sourceSelect.addEventListener('change', loadLiveLayer);
   els.hoursSelectButton.addEventListener('click', () => toggleSelectMenu('hours'));
@@ -148,6 +148,7 @@ function attachEvents() {
   els.saferRouteButton.addEventListener('click', () => setActiveRoute('safer'));
   els.fastestRouteButton.addEventListener('click', () => setActiveRoute('fastest'));
   els.stopRouteButton.addEventListener('click', clearNavigation);
+  els.navReportButton.addEventListener('click', () => toggleSheet('report', true));
   els.settingsButton.addEventListener('click', () => toggleSheet('settings', true));
   els.settingsCloseButton.addEventListener('click', () => toggleSheet('settings', false));
   els.settingsChatButton.addEventListener('click', () => toggleSheet('chat', true));
@@ -207,7 +208,6 @@ async function bootstrap() {
     syncPlannerControls();
     updateCompareButtonVisibility();
     syncLocateButtonState();
-    syncCompassButtonState();
     syncResponsiveUi();
     await loadLiveLayer();
     startLocationTracking();
@@ -1049,6 +1049,7 @@ function syncShellState() {
   els.settingsSheet.classList.toggle('hidden', activeSheet !== 'settings');
   els.chatSheet.classList.toggle('hidden', activeSheet !== 'chat');
   els.reportSheet.classList.toggle('hidden', activeSheet !== 'report');
+  els.navTopHud.classList.toggle('hidden', !hasRoute || Boolean(activeSheet));
   els.sheetBackdrop.classList.toggle('hidden', !activeSheet);
   els.bottomSheet.classList.toggle('hidden', hasRoute);
   syncNavigationSheetState();
@@ -1220,7 +1221,7 @@ function syncLocateButtonState() {
 }
 
 function syncCompassButtonState() {
-  els.compassButton.classList.toggle('active', state.headingEnabled || Number.isFinite(state.heading));
+  return;
 }
 
 function isCompactViewport() {

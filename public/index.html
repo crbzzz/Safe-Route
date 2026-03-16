@@ -46,6 +46,20 @@
       <div id="statusText" class="sr-only" aria-live="polite">Live city guidance</div>
       <button id="sheetBackdrop" class="sheet-backdrop hidden" type="button" aria-label="Close panel"></button>
 
+      <header id="navTopHud" class="top-hud hidden">
+        <div class="hud-actions hud-actions-top">
+          <button id="navReportButton" class="top-action-button nav-report-button" type="button" aria-label="Report an incident">
+            <svg class="top-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 4 21 20H3L12 4Z"></path>
+              <path d="M12 9v5"></path>
+              <circle cx="12" cy="17" r="1"></circle>
+            </svg>
+            <span class="nav-report-label">Report</span>
+            <span class="sr-only">Report</span>
+          </button>
+        </div>
+      </header>
+
       <section id="navCard" class="nav-card hidden">
         <button id="navSheetHandle" class="sheet-handle nav-sheet-handle" type="button" aria-label="Expand route details">
           <span class="sheet-handle-bar"></span>
@@ -61,7 +75,6 @@
           <span id="distanceRemaining">-- km left</span>
           <span id="riskSummary">Risk --</span>
         </div>
-        <p id="navStepMeta" class="nav-step-meta">Walk for -- min</p>
         <div class="route-progress-shell" aria-hidden="true">
           <div class="route-progress-track">
             <div id="routeProgressFill" class="route-progress-fill"></div>
@@ -113,7 +126,6 @@
         </div>
         <div class="settings-quick-actions">
           <button id="locateButton" class="settings-inline-button" type="button">My position</button>
-          <button id="compassButton" class="settings-inline-button" type="button">Compass</button>
         </div>
         <div class="settings-filters">
           <label class="sheet-field">
@@ -208,7 +220,6 @@
               <strong id="incidentEvents">--</strong>
             </article>
           </div>
-          <p class="settings-note">Risk scores use recent public-safety signals, time decay, and route proximity. This is guidance, not a guarantee of safety.</p>
         </div>
       </section>
 
