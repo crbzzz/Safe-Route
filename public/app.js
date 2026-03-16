@@ -40,6 +40,7 @@ const state = {
   navSheetExpanded: false,
   navSheetTouchStartY: null,
   reports: [],
+  renderedIncidentEvents: [],
   chatMessages: [
     {
       role: 'assistant',
@@ -257,6 +258,7 @@ function initMap() {
   state.map.on('dragstart', onManualMapInteraction);
   state.map.on('movestart', onManualMapInteraction);
   state.map.on('zoomstart', onManualMapInteraction);
+  state.map.on('click', onMapIncidentClick);
 
   state.liveLayer = L.layerGroup().addTo(state.map);
   state.routeLayer = L.layerGroup().addTo(state.map);
@@ -283,6 +285,7 @@ function createMapPanes() {
   }
 
   state.map.getPane('incidents-heat-pane').style.pointerEvents = 'none';
+  state.map.getPane('incidents-pane').style.pointerEvents = 'auto';
 }
 
 async function loadLiveLayer() {
@@ -351,6 +354,7 @@ function onSelectOptionClick(event) {
 
 function renderLiveLayer(data) {
   state.liveLayer.clearLayers();
+  state.renderedIncidentEvents = [];
 
   if (state.liveHeatLayer) {
     state.map.removeLayer(state.liveHeatLayer);
@@ -386,50 +390,75 @@ function renderLiveLayer(data) {
     },
   ).addTo(state.map);
 
-  if (state.map.getZoom() < 14.2) {
+  const zoom = state.map.getZoom();
+  if (zoom < 12.6) {
     return;
   }
 
+  const popupOptions = {
+    className: 'incident-popup-shell',
+    maxWidth: isCompactViewport() ? 260 : 320,
+    keepInView: true,
+    autoPanPaddingTopLeft: L.point(20, isCompactViewport() ? 84 : 24),
+    autoPanPaddingBottomRight: L.point(20, isCompactViewport() ? 188 : 44),
+  };
+
+  const visibleLimit = zoom >= 15.2 ? 140 : zoom >= 14.2 ? 110 : zoom >= 13.4 ? 72 : 36;
+  const tapRadius = isCompactViewport() ? 20 : 16;
+
   const visibleEvents = [...weightedEvents]
     .sort((a, b) => (b.weight || 0) - (a.weight || 0))
-    .slice(0, 120);
+    .slice(0, visibleLimit);
+  state.renderedIncidentEvents = visibleEvents;
 
   for (const event of visibleEvents) {
     const popupHtml = createIncidentPopupHtml(event);
-    const glow = L.circleMarker([event.lat, event.lng], {
+    const marker = L.marker([event.lat, event.lng], {
       pane: 'incidents-pane',
-      radius: 5 + event.weight * 6,
-      stroke: false,
-      fillColor: incidentGlowColor(event.weight),
-      fillOpacity: 0.04,
-      interactive: false,
+      keyboard: false,
+      riseOnHover: true,
+      icon: createIncidentMarkerIcon(event.weight, tapRadius),
     });
 
-    const tapTarget = L.circleMarker([event.lat, event.lng], {
-      pane: 'incidents-pane',
-      radius: 14,
-      stroke: false,
-      fillColor: '#ffffff',
-      fillOpacity: 0.01,
-      opacity: 0.01,
-    });
-
-    const marker = L.circleMarker([event.lat, event.lng], {
-      pane: 'incidents-pane',
-      radius: 3.6 + event.weight * 4.2,
-      color: 'rgba(255,255,255,0.46)',
-      fillColor: incidentCoreColor(event.weight),
-      fillOpacity: 0.88,
-      opacity: 0.92,
-      weight: 1.6,
-    });
-
-    tapTarget.bindPopup(popupHtml);
-    marker.bindPopup(popupHtml);
-    glow.addTo(state.liveLayer);
-    tapTarget.addTo(state.liveLayer);
+    marker.bindPopup(popupHtml, popupOptions);
+    marker.on('click', () => marker.openPopup());
     marker.addTo(state.liveLayer);
   }
+}
+
+function onMapIncidentClick(event) {
+  if (!state.renderedIncidentEvents.length || state.map.getZoom() < 12.6) {
+    return;
+  }
+
+  const clickPoint = state.map.latLngToContainerPoint(event.latlng);
+  const maxDistance = isCompactViewport() ? 28 : 22;
+  let closestEvent = null;
+  let closestDistance = Infinity;
+
+  for (const incident of state.renderedIncidentEvents) {
+    const incidentPoint = state.map.latLngToContainerPoint([incident.lat, incident.lng]);
+    const distance = clickPoint.distanceTo(incidentPoint);
+    if (distance <= maxDistance && distance < closestDistance) {
+      closestEvent = incident;
+      closestDistance = distance;
+    }
+  }
+
+  if (!closestEvent) {
+    return;
+  }
+
+  L.popup({
+    className: 'incident-popup-shell',
+    maxWidth: isCompactViewport() ? 260 : 320,
+    keepInView: true,
+    autoPanPaddingTopLeft: L.point(20, isCompactViewport() ? 84 : 24),
+    autoPanPaddingBottomRight: L.point(20, isCompactViewport() ? 188 : 44),
+  })
+    .setLatLng([closestEvent.lat, closestEvent.lng])
+    .setContent(createIncidentPopupHtml(closestEvent))
+    .openOn(state.map);
 }
 
 function startLocationTracking() {
@@ -1306,6 +1335,28 @@ function incidentCoreColor(weight) {
   if (weight >= 0.8) return '#f43f5e';
   if (weight >= 0.45) return '#f97316';
   return '#fde047';
+}
+
+function createIncidentMarkerIcon(weight, tapRadius) {
+  const coreSize = Math.round(9 + weight * 8);
+  const haloSize = Math.round(coreSize + 10);
+  const hitSize = Math.max(tapRadius * 2, haloSize + 8);
+
+  return L.divIcon({
+    className: 'incident-hit-icon',
+    html: `
+      <span
+        class="incident-hit-marker"
+        style="--incident-hit-size:${hitSize}px;--incident-core-size:${coreSize}px;--incident-halo-size:${haloSize}px;--incident-core:${incidentCoreColor(weight)};--incident-halo:${incidentGlowColor(weight)};"
+      >
+        <span class="incident-hit-marker__halo"></span>
+        <span class="incident-hit-marker__core"></span>
+      </span>
+    `,
+    iconSize: [hitSize, hitSize],
+    iconAnchor: [hitSize / 2, hitSize / 2],
+    popupAnchor: [0, -Math.round(hitSize / 2)],
+  });
 }
 
 function createIncidentPopupHtml(event) {

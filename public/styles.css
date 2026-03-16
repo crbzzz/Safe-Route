@@ -852,6 +852,43 @@ textarea::placeholder {
   background: #38bdf8;
 }
 
+.incident-hit-icon {
+  background: transparent;
+  border: 0;
+}
+
+.incident-hit-marker {
+  position: relative;
+  display: block;
+  width: var(--incident-hit-size);
+  height: var(--incident-hit-size);
+  cursor: pointer;
+}
+
+.incident-hit-marker__halo,
+.incident-hit-marker__core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+}
+
+.incident-hit-marker__halo {
+  width: var(--incident-halo-size);
+  height: var(--incident-halo-size);
+  background: color-mix(in srgb, var(--incident-halo) 28%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--incident-halo) 20%, transparent);
+}
+
+.incident-hit-marker__core {
+  width: var(--incident-core-size);
+  height: var(--incident-core-size);
+  background: var(--incident-core);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.28);
+}
+
 .user-marker-shell,
 .pin-shell {
   background: transparent;
@@ -1580,6 +1617,7 @@ body {
   font-size: 0.92rem;
   font-weight: 600;
   line-height: 1;
+  white-space: nowrap;
 }
 
 .nav-card,
@@ -2211,5 +2249,61 @@ textarea,
 @media (max-width: 640px) {
   #settingsSheet {
     max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+}
+
+.incident-popup-shell .leaflet-popup-content-wrapper {
+  border-radius: 18px;
+}
+
+.incident-popup-shell .leaflet-popup-content {
+  margin: 12px 14px;
+}
+
+#navTopHud .nav-report-button {
+  width: auto !important;
+  min-width: 106px !important;
+  max-width: none !important;
+  height: 40px !important;
+  padding: 0 14px 0 12px !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 999px !important;
+}
+
+#navTopHud .nav-report-button .top-action-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
+
+@media (max-width: 640px) {
+  #navTopHud .nav-report-button {
+    min-width: 122px !important;
+    height: 42px !important;
+    padding: 0 15px 0 12px !important;
+    justify-content: flex-start;
+    border-radius: 16px !important;
+  }
+
+  #navTopHud .nav-report-button .top-action-icon {
+    width: 17px;
+    height: 17px;
+    flex-basis: 17px;
+  }
+
+  #navTopHud .nav-report-label {
+    display: inline-block;
+    font-size: 0.9rem;
+  }
+
+  .incident-popup-shell .leaflet-popup-content-wrapper {
+    border-radius: 16px;
+  }
+
+  .incident-popup {
+    min-width: min(76vw, 250px);
   }
 }
