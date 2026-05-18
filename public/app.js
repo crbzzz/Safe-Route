@@ -2,6 +2,30 @@ const MAPBOX_STYLE_OWNER = 'crbzzz';
 const MAPBOX_STYLE_ID = 'cmmpojlnj00ip01sp48ee8glr';
 const MAPBOX_PUBLIC_TOKEN = 'pk.eyJ1IjoiY3Jienp6IiwiYSI6ImNtbXBuZjI5aDBwMm0ycXE2cGFkZHEzcjEifQ.elZd1th-WZW7WHV0xQyx0g';
 const REPORT_STORAGE_KEY = 'safe-route-sf-reports';
+const PRESET_INCIDENT_TYPES = [
+  'HOMICIDE',
+  'MURDER',
+  'ASSAULT / BATTERY',
+  'AGG ASSAULT / ADW',
+  'ROBBERY',
+  'STRONGARM ROBBERY',
+  'BURGLARY',
+  'SHOOTING',
+  'SHOTS FIRED',
+  'SHOT SPOTTER',
+  'STABBING',
+  'KIDNAPPING',
+  'PERSON W/GUN',
+  'PERSON W/KNIFE',
+  'STOLEN VEHICLE',
+  'GRAND THEFT',
+  'PETTY THEFT',
+  'VANDALISM',
+  'TRESPASSER',
+  'THREATS / HARASSMENT',
+  'SUSPICIOUS PERSON',
+  'SUSPICIOUS VEHICLE',
+];
 
 const state = {
   config: null,
@@ -1530,7 +1554,8 @@ function escapeHtml(value) {
 function syncIncidentTypeOptions(events) {
   const select = els.eventTypeSelect;
   const menu = els.eventTypeSelectMenu;
-  const options = ['all', ...new Set(events.map((event) => getIncidentEventName(event)).filter(Boolean))]
+  const liveEventTypes = events.map((event) => getIncidentEventName(event)).filter(Boolean);
+  const options = ['all', ...new Set([...PRESET_INCIDENT_TYPES, ...liveEventTypes])]
     .sort((left, right) => {
       if (left === 'all') return -1;
       if (right === 'all') return 1;
