@@ -1,0 +1,82 @@
+SafeRoute SF: Final Written Report
+
+Project Goal and Current Status
+SafeRoute SF is a web-based MVP for risk-aware walking navigation in San Francisco. The goal of the project is not to predict crime or label neighborhoods as "safe" or "unsafe," but to help users compare a fastest walking route against a safer alternative using recent public-safety signals. The app combines live map data, route comparison, filtering, and AI-generated explanations to make those tradeoffs easier to understand.
+
+At its current stage, the project is fully functional as a local demo and supports the core end-to-end experience. A user can select an origin and destination, load recent public-safety events, compare a fastest route and a safer route, inspect live activity on the map, filter by event type, ask an AI question about the route, and submit a local incident report stored on the device. The project is best described as a polished MVP: it demonstrates the main product idea clearly, but it still has limitations in data quality, model framing, and production readiness.
+
+Technical Architecture and Implementation
+The architecture is intentionally simple. The frontend is a vanilla HTML, CSS, and JavaScript client rendered in the browser. The backend is a lightweight Node.js HTTP server with no framework. This kept the project easy to reason about and allowed us to focus on the product logic instead of framework overhead.
+
+The frontend is responsible for rendering the map, handling user interaction, maintaining UI state, displaying the live event layer, and presenting route comparison results. It uses Leaflet for map rendering and overlays live events as both a heatmap and individual markers. It also manages route navigation state, geolocation, event filtering, the AI chat panel, and user-submitted local reports.
+
+The backend serves static assets and acts as the integration layer between the frontend and external services. It requests walking routes and geocoding results from Mapbox, fetches public-safety data from DataSF, normalizes those records into a consistent internal format, computes route risk scores using a custom heuristic, and optionally calls the Mistral API for route explanations and question answering. The server exposes a small API layer for configuration, geocoding, live event loading, route comparison, and AI chat.
+
+The most important technical work in the project is the transformation pipeline from raw public data to a usable route decision. DataSF records are not directly ready for product use, so the backend performs defensive field parsing and normalization. After normalization, events are filtered by time window and source, weighted using a heuristic, and scored relative to candidate routes. The scoring system considers the type of event, the distance from the route, the recency of the event, the source of the event, and a small night-time adjustment. From this, each route receives a risk score, a list of reasons, and nearby event context. The frontend then presents that result in a way that is understandable to non-technical users.
+
+Tools, Technologies, APIs, Databases, and Libraries Used
+The project uses a lightweight but capable stack. The backend runs on Node.js with the built-in HTTP server, without Express or another framework. The frontend is written in plain HTML, CSS, and JavaScript. Leaflet is used for map rendering and interactive overlays. The routing and geocoding layer is powered by the Mapbox Directions API and Mapbox Geocoding API. Public-safety event data comes from DataSF through Socrata open-data endpoints. The AI layer uses the Mistral Chat Completions API to generate route explanations and answer grounded user questions. Browser localStorage is used to persist user-submitted reports on the device. There is no full database in the current MVP.
+
+This stack was chosen deliberately. It is simple enough to move fast, but still strong enough to support real API orchestration, map interaction, route scoring, and AI-assisted explanation. That balance was important for a course project because it kept the technical depth in the logic of the application rather than in framework setup.
+
+What We Built Versus What We Leveraged
+We built the application logic that defines the product. That includes the Node.js backend, the frontend interface, the event normalization pipeline, the route scoring heuristic, the route comparison logic, the live filtering system, the AI request flow, and the local reporting feature. We also built the UI state management, map interactions, route overlays, event filtering by type, and the logic that makes selected event categories visible from lower zoom levels.
+
+We leveraged external services where it made sense to do so. Mapbox provides geocoding and route generation. DataSF provides raw public-safety records. Leaflet provides the core map rendering system. Mistral provides natural-language output for explanations and Q&A. In other words, we did not build a routing engine, a city-scale map renderer, or a foundation model from scratch. Instead, we focused on the actual technical contribution of the project: combining those pieces into a clear, explainable decision-support tool.
+
+This distinction matters for integrity. The project is not "just an API mashup," but it is also not pretending to reinvent infrastructure that already exists. The value of the work is in the architecture, data shaping, scoring, UI behavior, and product framing.
+
+How We Used LLMs and AI Tools
+AI appears in the project in two ways. First, it appears as a product feature. The application uses the Mistral API to generate route summaries and answer user questions about the current route comparison. The AI layer is grounded in structured route summary data rather than being asked to invent an answer from scratch. If Mistral is not configured, the app falls back to a deterministic non-LLM explanation so the product still functions.
+
+Second, AI tools were used during development to accelerate iteration. Tools such as GitHub Copilot and other LLM-based assistants were used for debugging, drafting interface changes, iterating on implementation details, and improving development speed. However, the system design, architecture, API integration, heuristic scoring, feature selection, and testing decisions remained ours. AI was used as an assistant, not as a substitute for technical ownership. We understand the code, we can explain the logic, and we can defend the design choices.
+
+That distinction is especially important in a class setting. We want to be clear that we used AI honestly and productively, but not as a black box that replaced engineering work.
+
+Individual and Team Contributions
+As a team, we collaborated on the overall product concept, project scope, feature prioritization, testing, and presentation. We also reviewed each other’s work to keep the app coherent across the backend, frontend, data pipeline, and AI features.
+
+Because the specific names and divisions of work may vary, the section below should be customized before submission:
+
+[Team Member 1] focused on backend architecture, API integration, event normalization, and route scoring.
+[Team Member 2] focused on frontend implementation, UI interactions, map rendering, and filter behavior.
+[Team Member 3] focused on AI integration, prompt flow, route explanation behavior, and chat functionality.
+[Team Member 4] focused on product framing, testing, debugging, demo flow, screenshots, and final documentation.
+
+Even where responsibilities were divided, this was not a set of isolated mini-projects. The most important parts of the system required cross-team coordination, especially the boundary between backend route analysis and frontend presentation. The project only worked because the data model, UI model, and explanation layer stayed aligned.
+
+Major Challenges, Limitations, Bugs, and Lessons Learned
+The biggest technical challenge was data quality. Open public datasets are useful, but they are messy. Field names can vary, records may be incomplete, categories are inconsistent, and schemas can change over time. That meant the backend had to normalize records defensively rather than assuming a perfect input format.
+
+A second challenge was designing a heuristic that was useful without overclaiming. It is easy to build a "risk score" that looks impressive but is conceptually misleading. We had to keep reminding ourselves that this system does not measure safety in any absolute sense. It only compares routes using recent public-safety signals. That is why our framing matters so much. The wording of the product is part of the technical integrity of the project.
+
+A third challenge was UI clarity, especially on mobile. The app contains many moving parts: a live map, route panels, filters, AI chat, and local reports. Several interface details had to be refined so that filters stayed readable, event types could be selected cleanly, and filtered markers remained visible from farther away. A good example is the event-type filter. Making the filter technically functional was easy; making it understandable and actually useful at a glance required multiple iterations.
+
+The current MVP also has real limitations. It is restricted to San Francisco because the data pipeline is tightly shaped around that local scope. The local reporting feature is stored only in browser localStorage and is not shared across users. The quality of route comparison depends on the freshness and structure of the public data feeds. The AI output can be helpful, but it still depends on the quality of the structured context given to it. Finally, the app is built as a demo-ready MVP, not a hardened production system. It does not yet have formal authentication, persistent backend storage, analytics, or comprehensive automated testing.
+
+The main lesson we learned is that building a useful technical product is less about piling on features and more about shaping uncertainty into something honest and legible. The project became stronger when we stopped trying to sound overly certain and instead focused on explainability, scope control, and clarity.
+
+Meaningful Screenshots and Explanations
+The report should include a small set of screenshots with one or two sentences each. These should show the product, not just decorate the report.
+
+Screenshot 1 should show the main map interface with the origin and destination flow. The caption can explain that this is the primary route planning screen where users search locations and begin a route comparison.
+
+Screenshot 2 should show the fastest route versus safer route comparison. The caption can explain that the app evaluates multiple candidate routes and presents the tradeoff between travel time and route risk.
+
+Screenshot 3 should show the live event map layer or a filtered event type view. The caption can explain that users can inspect recent public-safety signals on the map and isolate specific event types for easier interpretation.
+
+Screenshot 4 should show the AI support panel with a question and answer. The caption can explain that the AI layer generates route explanations and answers grounded questions using structured route summary data.
+
+Screenshot 5 should show either the settings/filter panel or a simple architecture diagram. The caption can explain either how users adjust the live-event view or how the frontend, backend, and external APIs interact.
+
+These screenshots should be brief, functional, and tied directly to what the user can do or what the system is computing. The goal is not to create a photo album. The goal is to make the report easy to understand in one pass.
+
+Process, Consistency, and Integrity
+This project was built through steady iteration rather than a single end-of-semester dump. The work involved incremental feature development, repeated UI refinements, API integration, debugging, and ongoing changes to the route analysis pipeline. That process matters because the course emphasizes not only the final artifact, but also the way the project was built over time.
+
+We also want to be explicit about integrity. We used external APIs, public datasets, third-party libraries, and AI tools, and we are disclosing them clearly. We are not claiming credit for Mapbox routing, DataSF’s underlying data, Leaflet’s map engine, or Mistral’s language model. Our contribution is in the integration, the logic, the product design, the engineering decisions, and the explanation of how the system works.
+
+Conclusion
+SafeRoute SF is a focused, technically meaningful MVP that explores a practical question: can walking directions become more informative when they account for recent public-safety signals? Our answer is yes, but only if the system is transparent about what it knows, what it guesses, and what it does not claim to know.
+
+The final project demonstrates technical depth through API orchestration, defensive data normalization, route scoring, live map interaction, and AI-assisted explanation. It also reflects an important design lesson: sometimes the hardest part of software is not computation, but communication. In this project, the real challenge was turning messy public data into a product that users can understand, question, and use responsibly.

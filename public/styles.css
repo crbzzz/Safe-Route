@@ -93,6 +93,7 @@ button {
   backdrop-filter: blur(10px);
 }
 
+
 .top-hud {
   top: max(14px, env(safe-area-inset-top));
   left: 14px;
@@ -646,6 +647,31 @@ textarea::placeholder {
   bottom: auto;
 }
 
+#settingsSheet {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+#eventTypeSelectMenu {
+  position: relative;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  width: 100%;
+  margin-top: 8px;
+  max-height: min(200px, 28vh);
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.18);
+}
+
+#eventTypeSelectMenu .select-option {
+  padding: 10px 12px;
+  line-height: 1.25;
+}
+
 .settings-severity-switch {
   margin: 0;
 }
@@ -709,15 +735,30 @@ textarea::placeholder {
   font-size: 0.9rem;
 }
 
+.chat-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 14px;
+  overflow: hidden;
+}
+
 .chat-messages {
   display: grid;
   gap: 10px;
-  flex: 1;
-  min-height: 160px;
-  overflow: auto;
-  margin: 14px 0;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding: 0 8px calc(18px + env(safe-area-inset-bottom)) 0;
+  margin: 0;
   align-content: start;
   justify-items: start;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  scrollbar-color: #b8c4d6 rgba(225, 230, 239, 0.78);
 }
 
 .chat-bubble {
@@ -780,6 +821,11 @@ textarea::placeholder {
 .chat-form {
   display: grid;
   gap: 10px;
+  flex: 0 0 auto;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(219, 227, 239, 0.92);
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .chat-form textarea {
@@ -2245,6 +2291,42 @@ textarea,
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
   max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+
+#chatSheet {
+  overflow: hidden !important;
+  padding-right: 16px;
+}
+
+#chatSheet .chat-messages {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+#chatSheet .chat-form {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 640px) {
+  #chatSheet {
+    overflow: hidden !important;
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+}
+
+#chatSheet .chat-messages::-webkit-scrollbar {
+  width: 12px;
+}
+
+#chatSheet .chat-messages::-webkit-scrollbar-track {
+  background: rgba(225, 230, 239, 0.78);
+  border-radius: 999px;
+}
+
+#chatSheet .chat-messages::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #c3cfdf, #98abc6);
+  border-radius: 999px;
+  border: 2px solid rgba(225, 230, 239, 0.78);
 }
 
 @media (max-width: 640px) {

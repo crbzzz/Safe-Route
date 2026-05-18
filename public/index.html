@@ -168,6 +168,20 @@
               </div>
             </div>
           </label>
+          <label class="sheet-field">
+            <span>Incident type</span>
+            <div class="custom-select" data-select="eventType">
+              <select id="eventTypeSelect" class="sr-only" aria-label="Incident type filter">
+                <option value="all" selected>All types</option>
+              </select>
+              <button id="eventTypeSelectButton" class="select-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+                <span id="eventTypeSelectLabel">All types</span>
+              </button>
+              <div id="eventTypeSelectMenu" class="select-menu hidden" role="listbox" aria-label="Incident type options">
+                <button class="select-option active" type="button" data-select="eventType" data-value="all">All types</button>
+              </div>
+            </div>
+          </label>
           <label class="severity-switch settings-severity-switch" for="violentOnlyInput">
             <span class="severity-copy">
               <strong>Highest severity only</strong>
@@ -251,7 +265,9 @@
           <strong>AI support</strong>
           <button id="chatCloseButton" class="ghost-button" type="button">Close</button>
         </div>
-        <div id="chatMessages" class="chat-messages"></div>
+        <div class="chat-sheet-body">
+          <div id="chatMessages" class="chat-messages"></div>
+        </div>
         <form id="chatForm" class="chat-form">
           <textarea id="askInput" rows="3" placeholder="Can I walk here right now?"></textarea>
           <button id="askButton" class="primary-button" type="submit">Ask</button>

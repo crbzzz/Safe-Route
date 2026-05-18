@@ -35,6 +35,7 @@ const state = {
   programmaticMoveUntil: 0,
   activeSheet: null,
   activeSelectMenu: null,
+  incidentTypeFilter: 'all',
   bottomSheetExpanded: false,
   bottomSheetTouchStartY: null,
   navSheetExpanded: false,
@@ -98,6 +99,10 @@ function bindElements() {
     'sourceSelectButton',
     'sourceSelectLabel',
     'sourceSelectMenu',
+    'eventTypeSelect',
+    'eventTypeSelectButton',
+    'eventTypeSelectLabel',
+    'eventTypeSelectMenu',
     'violentOnlyInput',
     'compareButton',
     'totalEvents',
@@ -136,8 +141,10 @@ function attachEvents() {
   els.sourceSelect.addEventListener('change', loadLiveLayer);
   els.hoursSelectButton.addEventListener('click', () => toggleSelectMenu('hours'));
   els.sourceSelectButton.addEventListener('click', () => toggleSelectMenu('source'));
+  els.eventTypeSelectButton.addEventListener('click', () => toggleSelectMenu('eventType'));
   els.hoursSelectMenu.addEventListener('click', onSelectOptionClick);
   els.sourceSelectMenu.addEventListener('click', onSelectOptionClick);
+  els.eventTypeSelectMenu.addEventListener('click', onSelectOptionClick);
   els.violentOnlyInput.addEventListener('change', loadLiveLayer);
   els.destinationInput.addEventListener('input', () => {
     queueSuggestions('destination');
@@ -314,20 +321,27 @@ function closeSelectMenus() {
 function syncSelectMenus() {
   const hoursOpen = state.activeSelectMenu === 'hours';
   const sourceOpen = state.activeSelectMenu === 'source';
+  const eventTypeOpen = state.activeSelectMenu === 'eventType';
 
   els.hoursSelectMenu.classList.toggle('hidden', !hoursOpen);
   els.sourceSelectMenu.classList.toggle('hidden', !sourceOpen);
+  els.eventTypeSelectMenu.classList.toggle('hidden', !eventTypeOpen);
   els.hoursSelectButton.classList.toggle('open', hoursOpen);
   els.sourceSelectButton.classList.toggle('open', sourceOpen);
+  els.eventTypeSelectButton.classList.toggle('open', eventTypeOpen);
   els.hoursSelectButton.setAttribute('aria-expanded', String(hoursOpen));
   els.sourceSelectButton.setAttribute('aria-expanded', String(sourceOpen));
+  els.eventTypeSelectButton.setAttribute('aria-expanded', String(eventTypeOpen));
 }
 
 function syncSelectLabels() {
   els.hoursSelectLabel.textContent = els.hoursSelect.options[els.hoursSelect.selectedIndex]?.textContent || '48h';
   els.sourceSelectLabel.textContent = els.sourceSelect.options[els.sourceSelect.selectedIndex]?.textContent || 'All';
+  els.eventTypeSelectLabel.textContent =
+    els.eventTypeSelect.options[els.eventTypeSelect.selectedIndex]?.textContent || 'All types';
   updateSelectOptionState('hours');
   updateSelectOptionState('source');
+  updateSelectOptionState('eventType');
 }
 
 function updateSelectOptionState(selectName) {
@@ -347,8 +361,15 @@ function onSelectOptionClick(event) {
   if (!select) return;
 
   select.value = option.dataset.value;
+  if (selectName === 'eventType') {
+    state.incidentTypeFilter = select.value;
+  }
   syncSelectLabels();
   closeSelectMenus();
+  if (selectName === 'eventType' && state.liveData) {
+    renderLiveLayer(state.liveData);
+    return;
+  }
   loadLiveLayer().catch((error) => setStatus(error.message || String(error)));
 }
 
@@ -371,14 +392,17 @@ function renderLiveLayer(data) {
     ...event,
     weight: severityToWeight(event.severity),
   }));
+  syncIncidentTypeOptions(weightedEvents);
+  const filteredEvents = weightedEvents.filter(matchesIncidentTypeFilter);
+  const focusedEventType = hasFocusedIncidentTypeFilter();
 
   state.liveHeatLayer = L.heatLayer(
-    weightedEvents.map((event) => [event.lat, event.lng, event.weight]),
+    filteredEvents.map((event) => [event.lat, event.lng, focusedEventType ? Math.max(event.weight, 0.55) : event.weight]),
     {
       pane: 'incidents-heat-pane',
-      radius: 18,
-      blur: 18,
-      minOpacity: 0.06,
+      radius: focusedEventType ? 24 : 18,
+      blur: focusedEventType ? 22 : 18,
+      minOpacity: focusedEventType ? 0.12 : 0.06,
       max: 1.35,
       gradient: {
         0.18: '#1d4ed8',
@@ -391,7 +415,8 @@ function renderLiveLayer(data) {
   ).addTo(state.map);
 
   const zoom = state.map.getZoom();
-  if (zoom < 14.6) {
+  const markerZoomThreshold = focusedEventType ? 11.2 : 14.6;
+  if (zoom < markerZoomThreshold) {
     return;
   }
 
@@ -403,10 +428,10 @@ function renderLiveLayer(data) {
     autoPanPaddingBottomRight: L.point(20, isCompactViewport() ? 188 : 44),
   };
 
-  const tapRadius = isCompactViewport() ? 20 : 16;
-  const minVisibleWeight = getMinVisibleIncidentWeight(zoom);
+  const tapRadius = focusedEventType ? (isCompactViewport() ? 28 : 24) : isCompactViewport() ? 20 : 16;
+  const minVisibleWeight = focusedEventType ? 0 : getMinVisibleIncidentWeight(zoom);
 
-  const visibleEvents = [...weightedEvents]
+  const visibleEvents = [...filteredEvents]
     .filter((event) => (event.weight || 0) >= minVisibleWeight)
     .sort((a, b) => (b.weight || 0) - (a.weight || 0));
   state.renderedIncidentEvents = visibleEvents;
@@ -417,7 +442,7 @@ function renderLiveLayer(data) {
       pane: 'incidents-pane',
       keyboard: false,
       riseOnHover: true,
-      icon: createIncidentMarkerIcon(event.weight, tapRadius),
+      icon: createIncidentMarkerIcon(event.weight, tapRadius, focusedEventType ? 1.55 : 1),
     });
 
     marker.bindPopup(popupHtml, popupOptions);
@@ -1345,9 +1370,9 @@ function incidentCoreColor(weight) {
   return '#fde047';
 }
 
-function createIncidentMarkerIcon(weight, tapRadius) {
-  const coreSize = Math.round(9 + weight * 8);
-  const haloSize = Math.round(coreSize + 10);
+function createIncidentMarkerIcon(weight, tapRadius, emphasisScale = 1) {
+  const coreSize = Math.round((9 + weight * 8) * emphasisScale);
+  const haloSize = Math.round(coreSize + 10 * emphasisScale);
   const hitSize = Math.max(tapRadius * 2, haloSize + 8);
 
   return L.divIcon({
@@ -1500,4 +1525,81 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function syncIncidentTypeOptions(events) {
+  const select = els.eventTypeSelect;
+  const menu = els.eventTypeSelectMenu;
+  const options = ['all', ...new Set(events.map((event) => getIncidentEventName(event)).filter(Boolean))]
+    .sort((left, right) => {
+      if (left === 'all') return -1;
+      if (right === 'all') return 1;
+      return left.localeCompare(right, undefined, { sensitivity: 'base' });
+    });
+
+  if (!options.includes(state.incidentTypeFilter)) {
+    state.incidentTypeFilter = 'all';
+  }
+
+  select.innerHTML = '';
+  menu.innerHTML = '';
+
+  for (const optionValue of options) {
+    const optionLabel = optionValue === 'all' ? 'All types' : optionValue;
+    const option = document.createElement('option');
+    option.value = optionValue;
+    option.textContent = optionLabel;
+    option.selected = optionValue === state.incidentTypeFilter;
+    select.appendChild(option);
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'select-option';
+    if (optionValue === state.incidentTypeFilter) {
+      button.classList.add('active');
+    }
+    button.dataset.select = 'eventType';
+    button.dataset.value = optionValue;
+    button.textContent = optionLabel;
+    menu.appendChild(button);
+  }
+
+  select.value = state.incidentTypeFilter;
+  syncSelectLabels();
+}
+
+function matchesIncidentTypeFilter(event) {
+  if (state.incidentTypeFilter === 'all') {
+    return true;
+  }
+
+  return getIncidentEventName(event) === state.incidentTypeFilter;
+}
+
+function hasFocusedIncidentTypeFilter() {
+  return state.incidentTypeFilter && state.incidentTypeFilter !== 'all';
+}
+
+function getIncidentCategory(event) {
+  return (
+    event.incident_category ||
+    event.incidentCategory ||
+    event.category ||
+    event.source ||
+    'Unknown'
+  );
+}
+
+function getIncidentEventName(event) {
+  return (
+    event.event_type ||
+    event.eventType ||
+    event.callType ||
+    event.call_type ||
+    event.originalCrimeTypeName ||
+    event.original_crime_type_name ||
+    event.primaryType ||
+    event.description ||
+    'Unknown'
+  );
 }
